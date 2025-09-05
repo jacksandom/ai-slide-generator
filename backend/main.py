@@ -155,44 +155,78 @@ async def chat(request: ChatRequest):
         user_msg_openai = {"role": "user", "content": user_input}
         update_conversations_with_openai_message(session_id, user_msg_openai)
         
-        # Main conversation loop until finish_reason == "stop"
+        # Start background processing
+        import threading
+        thread = threading.Thread(target=process_conversation_sync, args=(session_id,))
+        thread.daemon = True
+        thread.start()
+        
+        # Return immediately with user message added
+        conv = get_or_create_conversation(session_id)
+        return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing chat: {str(e)}")
+
+def process_conversation_sync(session_id: str):
+    """Process conversation in background thread"""
+    try:
+        print(f"Starting async processing for session {session_id}")
+        conv = get_or_create_conversation(session_id)
         max_iterations = 30
         iteration = 0
         
-        conv = get_or_create_conversation(session_id)
-        
         while iteration < max_iterations:
             iteration += 1
+            print(f"Iteration {iteration} - calling LLM")
             
             # Call LLM with OpenAI format conversation
             assistant_response, stop = chatbot_instance.call_llm(conv["openai_conversation"])
+            print(f"LLM response received, stop={stop}")
             
             # Add assistant response to conversations
             update_conversations_with_openai_message(session_id, assistant_response)
+            print(f"Added assistant response to conversation")
             
             # If assistant used tools, execute them
             if "tool_calls" in assistant_response:
+                print(f"Assistant wants to use {len(assistant_response['tool_calls'])} tools")
                 for tool_call in assistant_response["tool_calls"]:
+                    print(f"Executing tool: {tool_call['function']['name']}")
                     # Execute the tool
                     tool_result = chatbot_instance.execute_tool_call(tool_call)
                     
                     # Add tool result to conversations
                     update_conversations_with_openai_message(session_id, tool_result)
+                    print(f"Added tool result to conversation")
             
             # Check if we're done
             if stop:
+                print(f"Conversation complete after {iteration} iterations")
                 break
                 
             # Safety check
             if iteration >= max_iterations:
+                print(f"Reached maximum iterations ({max_iterations})")
                 error_msg = {"role": "assistant", "content": "Reached maximum iterations. Please try a simpler request."}
                 update_conversations_with_openai_message(session_id, error_msg)
                 break
-        
-        return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
-        
+                
+        print(f"Async processing complete for session {session_id}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing chat: {str(e)}")
+        print(f"Error in async processing: {e}")
+        import traceback
+        traceback.print_exc()
+
+@app.get("/chat/status/{session_id}")
+async def get_chat_status(session_id: str):
+    """Get current conversation status and messages"""
+    conv = get_or_create_conversation(session_id)
+    return {
+        "messages": conv["api_conversation"],
+        "session_id": session_id,
+        "message_count": len(conv["api_conversation"])
+    }
 
 @app.get("/slides/html", response_model=SlidesResponse)
 async def get_slides_html():

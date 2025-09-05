@@ -130,7 +130,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('Generate a succinct report EY Parthenon. Do not generate more than 5 slides. Use the information available in your tools. Use visualisations. Include an overview slide of EY Parthenon. Think about your response.');
   const [isLoading, setIsLoading] = useState(false);
+  const [lastMessageCount, setLastMessageCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -140,6 +142,79 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
     scrollToBottom();
   }, [messages]);
 
+  const pollForUpdates = async () => {
+    try {
+      console.log('Polling for updates...');
+      const response = await axios.get('http://localhost:8000/chat/status/default');
+      const newMessages = response.data.messages;
+      const newMessageCount = response.data.message_count;
+      
+      console.log(`Received ${newMessageCount} messages (was ${lastMessageCount})`);
+      console.log('Current messages in state:', messages.length);
+      
+      // Always update if there are new messages
+      if (newMessageCount !== lastMessageCount) {
+        console.log('Message count changed, updating UI');
+        console.log('New messages:', newMessages);
+        setMessages([...newMessages]); // Force new array to trigger re-render
+        setLastMessageCount(newMessageCount);
+        onSlideUpdate(); // Refresh slides when conversation updates
+      }
+      
+      // More relaxed completion detection - only stop if we haven't seen new messages for a while
+      const lastMessage = newMessages[newMessages.length - 1];
+      let shouldStopPolling = false;
+      
+      if (newMessages.length > 1 && lastMessage?.role === 'assistant') {
+        // Look for a final assistant message that's not a tool message
+        const isToolMessage = lastMessage.metadata?.title?.includes('🔧') || 
+                             lastMessage.metadata?.title?.includes('tool') ||
+                             lastMessage.metadata?.title?.includes('Tool');
+        
+        console.log(`Last message: role=${lastMessage.role}, hasMetadata=${!!lastMessage.metadata?.title}, isToolMessage=${isToolMessage}`);
+        
+        // Only stop if it's been a regular assistant message for a few polls
+        if (!isToolMessage && !lastMessage.metadata?.title) {
+          // Check if message count hasn't changed recently
+          if (newMessageCount === lastMessageCount) {
+            shouldStopPolling = true;
+          }
+        }
+      }
+      
+      if (shouldStopPolling) {
+        console.log('Conversation appears complete, stopping polling');
+        setIsLoading(false);
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+      }
+    } catch (error: any) {
+      console.error('Error polling for updates:', error);
+      console.error('Error details:', error.response?.data || error.message);
+      // Continue polling on error
+    }
+  };
+
+  const startPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+    }
+    
+    // Start polling every 1000ms for real-time feel
+    pollingRef.current = setInterval(pollForUpdates, 1000);
+    
+    // Set a timeout to stop polling after 2 minutes if no completion detected
+    setTimeout(() => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+        setIsLoading(false);
+      }
+    }, 120000); // 2 minutes
+  };
+
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
 
@@ -148,13 +223,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
     setIsLoading(true);
 
     try {
+      // Send message to backend
       const response = await axios.post('http://localhost:8000/chat', {
         message: userMessage,
         session_id: 'default'
       });
 
+      // Update with immediate response (should include user message)
       setMessages(response.data.messages);
-      onSlideUpdate(); // Refresh slides after chat interaction
+      setLastMessageCount(response.data.messages.length);
+      
+      // Start polling for real-time updates
+      startPolling();
+      
     } catch (error) {
       console.error('Error sending message:', error);
       // Add error message to chat
@@ -163,10 +244,36 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
         content: 'Sorry, there was an error processing your request. Please try again.',
         metadata: { title: '❌ Error' }
       }]);
-    } finally {
       setIsLoading(false);
     }
   };
+
+  // Test function to debug the backend connection
+  const testBackendConnection = async () => {
+    try {
+      console.log('Testing backend connection...');
+      const response = await axios.get('http://localhost:8000/health');
+      console.log('Backend health check:', response.data);
+      
+      const statusResponse = await axios.get('http://localhost:8000/chat/status/default');
+      console.log('Current conversation status:', statusResponse.data);
+      
+      // Force update UI with current messages
+      setMessages([...statusResponse.data.messages]);
+      setLastMessageCount(statusResponse.data.message_count);
+    } catch (error: any) {
+      console.error('Backend connection test failed:', error);
+    }
+  };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+      }
+    };
+  }, []);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -204,7 +311,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
         
         {isLoading && (
           <LoadingIndicator>
-            <span>🤔 Thinking...</span>
+            <span>🤔 Processing your request...</span>
           </LoadingIndicator>
         )}
         
@@ -221,6 +328,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
         />
         <SendButton onClick={sendMessage} disabled={isLoading || !inputValue.trim()}>
           Send
+        </SendButton>
+        <SendButton onClick={testBackendConnection} style={{background: '#10b981'}}>
+          Test
         </SendButton>
       </InputContainer>
     </ChatContainer>

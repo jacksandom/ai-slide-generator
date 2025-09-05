@@ -135,12 +135,6 @@ const SlideViewer: React.FC<SlideViewerProps> = ({
 }) => {
   const hasSlides = html && html.trim().length > 0;
 
-  const createSlideDataUrl = (htmlContent: string) => {
-    // Escape the HTML content for use in srcdoc
-    return htmlContent
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  };
 
   return (
     <ViewerContainer>

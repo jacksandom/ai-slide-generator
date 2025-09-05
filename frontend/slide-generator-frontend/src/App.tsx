@@ -41,7 +41,7 @@ const Subtitle = styled.p`
 
 const MainContent = styled.div`
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 2fr;
   gap: 0;
   min-height: 600px;
 
@@ -63,7 +63,10 @@ const ChatSection = styled.div`
 
 const SlideSection = styled.div`
   padding: 30px;
-  background: white;
+  background: #f5f5f5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 `;
 
 const SectionTitle = styled.h2`

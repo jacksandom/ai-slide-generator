@@ -31,35 +31,85 @@ const MessagesContainer = styled.div`
   max-height: 400px;
 `;
 
-const Message = styled.div<{ $isUser: boolean; $hasMetadata?: boolean }>`
+const Message = styled.div<{ $isUser: boolean }>`
   margin-bottom: 16px;
   display: flex;
   flex-direction: column;
   align-items: ${props => props.$isUser ? 'flex-end' : 'flex-start'};
 `;
 
-const MessageBubble = styled.div<{ $isUser: boolean; $hasMetadata?: boolean }>`
-  max-width: 80%;
+const MessageBubble = styled.div<{ $isUser: boolean }>`
+  max-width: 85%;
   padding: 12px 16px;
   border-radius: 18px;
-  background: ${props => {
-    if (props.$hasMetadata) return '#f3f4f6';
-    return props.$isUser ? '#667eea' : '#f3f4f6';
-  }};
-  color: ${props => {
-    if (props.$hasMetadata) return '#374151';
-    return props.$isUser ? 'white' : '#374151';
-  }};
+  background: ${props => props.$isUser ? '#667eea' : '#f3f4f6'};
+  color: ${props => props.$isUser ? 'white' : '#374151'};
   word-wrap: break-word;
   line-height: 1.5;
-  border: ${props => props.$hasMetadata ? '1px solid #d1d5db' : 'none'};
+  font-size: 14px;
 `;
 
-const MessageMetadata = styled.div`
-  font-size: 0.8rem;
-  color: #6b7280;
-  margin-bottom: 4px;
+const ToolSection = styled.div`
+  margin-bottom: 16px;
+  width: 100%;
+`;
+
+const ToolAccordion = styled.div`
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafbfc;
+`;
+
+const ToolHeader = styled.button<{ $isExpanded: boolean }>`
+  width: 100%;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border: none;
+  border-radius: ${props => props.$isExpanded ? '8px 8px 0 0' : '8px'};
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
   font-weight: 600;
+  color: #6366f1;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: #f1f5f9;
+  }
+`;
+
+const ToolIcon = styled.span<{ $isExpanded: boolean }>`
+  transition: transform 0.2s;
+  transform: ${props => props.$isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'};
+`;
+
+const ToolContent = styled.div<{ $isExpanded: boolean }>`
+  display: ${props => props.$isExpanded ? 'block' : 'none'};
+  padding: 16px;
+  border-top: 1px solid #e5e7eb;
+  background: white;
+  border-radius: 0 0 8px 8px;
+`;
+
+const ToolMessage = styled.div<{ $isRequest: boolean }>`
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+  background: ${props => props.$isRequest ? '#fef3c7' : '#d1fae5'};
+  border-left: 3px solid ${props => props.$isRequest ? '#f59e0b' : '#10b981'};
+`;
+
+const ToolLabel = styled.div`
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #374151;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 `;
 
 const InputContainer = styled.div`
@@ -117,6 +167,7 @@ const LoadingIndicator = styled.div`
   gap: 8px;
   color: #6b7280;
   font-style: italic;
+  font-size: 13px;
 `;
 
 const PlaceholderMessage = styled.div`
@@ -126,11 +177,18 @@ const PlaceholderMessage = styled.div`
   padding: 40px 20px;
 `;
 
+interface ToolGroup {
+  id: string;
+  messages: ChatMessage[];
+  isExpanded: boolean;
+}
+
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('Generate a succinct report EY Parthenon. Do not generate more than 5 slides. Use the information available in your tools. Use visualisations. Include an overview slide of EY Parthenon. Think about your response.');
   const [isLoading, setIsLoading] = useState(false);
   const [lastMessageCount, setLastMessageCount] = useState(0);
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -142,6 +200,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
     scrollToBottom();
   }, [messages]);
 
+  const toggleToolExpansion = (toolId: string) => {
+    setExpandedTools(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(toolId)) {
+        newSet.delete(toolId);
+      } else {
+        newSet.add(toolId);
+      }
+      return newSet;
+    });
+  };
+
   const pollForUpdates = async () => {
     try {
       console.log('Polling for updates...');
@@ -149,45 +219,40 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
       const newMessages = response.data.messages;
       const newMessageCount = response.data.message_count;
       
-      console.log(`Received ${newMessageCount} messages (was ${lastMessageCount})`);
-      console.log('Current messages in state:', messages.length);
+      console.log(`Current count: ${lastMessageCount}, New count: ${newMessageCount}`);
       
-      // Always update if there are new messages
       if (newMessageCount !== lastMessageCount) {
         console.log('Message count changed, updating UI');
         console.log('New messages:', newMessages);
         setMessages([...newMessages]); // Force new array to trigger re-render
         setLastMessageCount(newMessageCount);
-        onSlideUpdate(); // Refresh slides when conversation updates
+        onSlideUpdate(); // Refresh slides when new messages arrive
       }
       
-      // More relaxed completion detection - only stop if we haven't seen new messages for a while
-      const lastMessage = newMessages[newMessages.length - 1];
-      let shouldStopPolling = false;
-      
-      if (newMessages.length > 1 && lastMessage?.role === 'assistant') {
-        // Look for a final assistant message that's not a tool message
-        const isToolMessage = lastMessage.metadata?.title?.includes('🔧') || 
-                             lastMessage.metadata?.title?.includes('tool') ||
-                             lastMessage.metadata?.title?.includes('Tool');
+      // Check if conversation is complete
+      if (newMessages.length > 0) {
+        const lastMessage = newMessages[newMessages.length - 1];
+        const lastFewMessages = newMessages.slice(-3); // Look at last 3 messages
         
-        console.log(`Last message: role=${lastMessage.role}, hasMetadata=${!!lastMessage.metadata?.title}, isToolMessage=${isToolMessage}`);
-        
-        // Only stop if it's been a regular assistant message for a few polls
-        if (!isToolMessage && !lastMessage.metadata?.title) {
-          // Check if message count hasn't changed recently
-          if (newMessageCount === lastMessageCount) {
-            shouldStopPolling = true;
+        // Stop polling if we have a final assistant response (not a tool-related message)
+        if (lastMessage?.role === 'assistant') {
+          // Look for tool result followed by assistant response pattern
+          const hasToolResult = lastFewMessages.some((msg: ChatMessage) => msg.metadata?.title?.includes('Tool result'));
+          const hasFollowupResponse = lastMessage && !lastMessage.metadata?.title;
+          
+          // Or just a regular assistant response without tool usage
+          if ((hasToolResult && hasFollowupResponse) || (!hasToolResult && !lastMessage.metadata?.title)) {
+            console.log('Conversation appears complete, stopping polling after a few more checks');
+            // Give it a few more polls to make sure
+            setTimeout(() => {
+              if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+                setIsLoading(false);
+                console.log('Polling stopped - conversation complete');
+              }
+            }, 3000); // Wait 3 seconds to confirm completion
           }
-        }
-      }
-      
-      if (shouldStopPolling) {
-        console.log('Conversation appears complete, stopping polling');
-        setIsLoading(false);
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current);
-          pollingRef.current = null;
         }
       }
     } catch (error: any) {
@@ -201,54 +266,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
     }
-    
-    // Start polling every 1000ms for real-time feel
-    pollingRef.current = setInterval(pollForUpdates, 1000);
-    
-    // Set a timeout to stop polling after 2 minutes if no completion detected
-    setTimeout(() => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-        setIsLoading(false);
-      }
-    }, 120000); // 2 minutes
+    pollingRef.current = setInterval(pollForUpdates, 1000); // Poll every second
   };
 
-  const sendMessage = async () => {
-    if (!inputValue.trim() || isLoading) return;
-
-    const userMessage = inputValue.trim();
-    setInputValue('');
-    setIsLoading(true);
-
-    try {
-      // Send message to backend
-      const response = await axios.post('http://localhost:8000/chat', {
-        message: userMessage,
-        session_id: 'default'
-      });
-
-      // Update with immediate response (should include user message)
-      setMessages(response.data.messages);
-      setLastMessageCount(response.data.messages.length);
-      
-      // Start polling for real-time updates
-      startPolling();
-      
-    } catch (error) {
-      console.error('Error sending message:', error);
-      // Add error message to chat
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: 'Sorry, there was an error processing your request. Please try again.',
-        metadata: { title: '❌ Error' }
-      }]);
-      setIsLoading(false);
-    }
-  };
-
-  // Test function to debug the backend connection
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const testBackendConnection = async () => {
     try {
       console.log('Testing backend connection...');
@@ -275,43 +296,160 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
     };
   }, []);
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
+  const handleSendMessage = async () => {
+    if (!inputValue.trim() || isLoading) return;
+
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: inputValue.trim()
+    };
+
+    // Add user message immediately
+    setMessages(prev => [...prev, userMessage]);
+    setInputValue('');
+    setIsLoading(true);
+
+    try {
+      // Send message to backend
+      await axios.post('http://localhost:8000/chat', {
+        message: userMessage.content
+      });
+
+      // Start polling for updates
+      startPolling();
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setIsLoading(false);
     }
   };
 
-  const renderMessage = (message: ChatMessage, index: number) => {
-    const isUser = message.role === 'user';
-    const hasMetadata = !!message.metadata?.title;
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
+  // Group messages into conversation flows and tool groups
+  const groupMessages = (messages: ChatMessage[]) => {
+    const groups: (ChatMessage | ToolGroup)[] = [];
+    let currentToolGroup: ChatMessage[] = [];
+    let toolGroupId = 0;
+
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
+      const isToolMessage = message.metadata?.title && (
+        message.metadata.title.includes('Tool') || 
+        message.metadata.title.includes('tool')
+      );
+
+      if (isToolMessage) {
+        currentToolGroup.push(message);
+      } else {
+        // If we have accumulated tool messages, create a tool group
+        if (currentToolGroup.length > 0) {
+          groups.push({
+            id: `tool-group-${toolGroupId++}`,
+            messages: [...currentToolGroup],
+            isExpanded: false
+          });
+          currentToolGroup = [];
+        }
+        
+        // Add the regular message
+        groups.push(message);
+      }
+    }
+
+    // Handle any remaining tool messages
+    if (currentToolGroup.length > 0) {
+      groups.push({
+        id: `tool-group-${toolGroupId++}`,
+        messages: [...currentToolGroup],
+        isExpanded: false
+      });
+    }
+
+    return groups;
+  };
+
+  const isToolGroup = (item: ChatMessage | ToolGroup): item is ToolGroup => {
+    return 'id' in item && 'messages' in item;
+  };
+
+  const renderToolGroup = (toolGroup: ToolGroup) => {
+    const isExpanded = expandedTools.has(toolGroup.id);
+    const toolCount = toolGroup.messages.length;
+    const hasRequests = toolGroup.messages.some(msg => msg.metadata?.title?.includes('request'));
+    const hasResults = toolGroup.messages.some(msg => msg.metadata?.title?.includes('result'));
 
     return (
-      <Message key={index} $isUser={isUser} $hasMetadata={hasMetadata}>
-        {hasMetadata && (
-          <MessageMetadata>{message.metadata?.title}</MessageMetadata>
-        )}
-        <MessageBubble $isUser={isUser} $hasMetadata={hasMetadata}>
-          {message.content}
-        </MessageBubble>
-      </Message>
+      <ToolSection key={toolGroup.id}>
+        <ToolAccordion>
+          <ToolHeader 
+            $isExpanded={isExpanded}
+            onClick={() => toggleToolExpansion(toolGroup.id)}
+          >
+            <span>
+              🔧 AI Tools Used ({toolCount} operations)
+              {hasRequests && hasResults && ' - Requests & Results'}
+            </span>
+            <ToolIcon $isExpanded={isExpanded}>▶</ToolIcon>
+          </ToolHeader>
+          <ToolContent $isExpanded={isExpanded}>
+            {toolGroup.messages.map((msg, idx) => {
+              const isRequest = msg.metadata?.title?.toLowerCase().includes('request') || 
+                               msg.metadata?.title?.toLowerCase().includes('tool call');
+              return (
+                <ToolMessage key={idx} $isRequest={isRequest}>
+                  <ToolLabel>
+                    {isRequest ? '🚀 Tool Request' : '✅ Tool Result'}
+                  </ToolLabel>
+                  {msg.metadata?.title && (
+                    <div style={{ fontWeight: 600, marginBottom: '4px', fontSize: '12px' }}>
+                      {msg.metadata.title}
+                    </div>
+                  )}
+                  <div>{msg.content}</div>
+                </ToolMessage>
+              );
+            })}
+          </ToolContent>
+        </ToolAccordion>
+      </ToolSection>
     );
   };
+
+  const groupedMessages = groupMessages(messages);
 
   return (
     <ChatContainer>
       <MessagesContainer>
-        {messages.length === 0 ? (
+        {groupedMessages.length === 0 ? (
           <PlaceholderMessage>
-            Start by asking me to create slides! For example: 'Create a 3-slide deck about AI benefits'
+            👋 Hi! I'm your AI slide creation assistant. Send me a message to get started!
           </PlaceholderMessage>
         ) : (
-          messages.map(renderMessage)
+          groupedMessages.map((item, index) => {
+            if (isToolGroup(item)) {
+              return renderToolGroup(item);
+            } else {
+              const message = item;
+              return (
+                <Message key={index} $isUser={message.role === 'user'}>
+                  <MessageBubble $isUser={message.role === 'user'}>
+                    {message.content}
+                  </MessageBubble>
+                </Message>
+              );
+            }
+          })
         )}
         
         {isLoading && (
           <LoadingIndicator>
-            <span>🤔 Processing your request...</span>
+            <span>🤖</span>
+            <span>AI is thinking and working...</span>
           </LoadingIndicator>
         )}
         
@@ -323,14 +461,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder="Enter your slide creation request here..."
+          placeholder="Describe the slides you want to create..."
           disabled={isLoading}
         />
-        <SendButton onClick={sendMessage} disabled={isLoading || !inputValue.trim()}>
-          Send
-        </SendButton>
-        <SendButton onClick={testBackendConnection} style={{background: '#10b981'}}>
-          Test
+        <SendButton onClick={handleSendMessage} disabled={isLoading || !inputValue.trim()}>
+          {isLoading ? '⏳' : 'Send'}
         </SendButton>
       </InputContainer>
     </ChatContainer>

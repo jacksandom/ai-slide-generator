@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import styled from 'styled-components';
 import axios from 'axios';
+import ReactMarkdown from 'react-markdown';
 
 interface ChatMessage {
   role: string;
@@ -47,6 +48,84 @@ const MessageBubble = styled.div<{ $isUser: boolean }>`
   word-wrap: break-word;
   line-height: 1.5;
   font-size: 14px;
+`;
+
+const MarkdownContent = styled.div`
+  h1, h2, h3, h4, h5, h6 {
+    margin: 0.5em 0 0.3em 0;
+    font-weight: 600;
+  }
+  
+  h1 { font-size: 1.3em; }
+  h2 { font-size: 1.2em; }
+  h3 { font-size: 1.1em; }
+  h4 { font-size: 1.05em; }
+  
+  p {
+    margin: 0.5em 0;
+    
+    &:first-child {
+      margin-top: 0;
+    }
+    
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+  
+  ul, ol {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+  }
+  
+  li {
+    margin: 0.2em 0;
+  }
+  
+  code {
+    background: rgba(0, 0, 0, 0.08);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85em;
+  }
+  
+  pre {
+    background: rgba(0, 0, 0, 0.08);
+    padding: 8px 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 0.5em 0;
+    
+    code {
+      background: none;
+      padding: 0;
+    }
+  }
+  
+  blockquote {
+    border-left: 3px solid #667eea;
+    margin: 0.5em 0;
+    padding-left: 1em;
+    font-style: italic;
+  }
+  
+  strong {
+    font-weight: 600;
+  }
+  
+  em {
+    font-style: italic;
+  }
+  
+  a {
+    color: #4f46e5;
+    text-decoration: none;
+    
+    &:hover {
+      text-decoration: underline;
+    }
+  }
 `;
 
 const ToolSection = styled.div`
@@ -438,7 +517,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
               return (
                 <Message key={index} $isUser={message.role === 'user'}>
                   <MessageBubble $isUser={message.role === 'user'}>
-                    {message.content}
+                    {message.role === 'assistant' ? (
+                      <MarkdownContent>
+                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                      </MarkdownContent>
+                    ) : (
+                      message.content
+                    )}
                   </MessageBubble>
                 </Message>
               );

@@ -17,13 +17,25 @@ const ViewerContainer = styled.div`
 
 const SlideDisplay = styled.div`
   flex: 1;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #f9fafb;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 20px;
   margin-bottom: 20px;
   position: relative;
-  min-height: 400px;
+  min-height: 500px;
+`;
+
+const SlideFrame = styled.div`
+  width: 100%;
+  max-width: 800px;
+  aspect-ratio: 16/9;
+  border: 2px solid #d1d5db;
+  border-radius: 12px;
+  overflow: hidden;
+  background: white;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  position: relative;
 `;
 
 const IFrame = styled.iframe`
@@ -124,6 +136,8 @@ const LoadingOverlay = styled.div`
   justify-content: center;
   font-size: 1.1rem;
   color: #667eea;
+  border-radius: 12px;
+  z-index: 10;
 `;
 
 const SlideViewer: React.FC<SlideViewerProps> = ({
@@ -139,18 +153,19 @@ const SlideViewer: React.FC<SlideViewerProps> = ({
   return (
     <ViewerContainer>
       <SlideDisplay>
-        {isRefreshing && (
-          <LoadingOverlay>
-            🔄 Refreshing slides...
-          </LoadingOverlay>
-        )}
-        
         {hasSlides ? (
-          <IFrame
-            srcDoc={html}
-            title="Generated Slides"
-            sandbox="allow-scripts allow-same-origin"
-          />
+          <SlideFrame>
+            {isRefreshing && (
+              <LoadingOverlay>
+                🔄 Refreshing slides...
+              </LoadingOverlay>
+            )}
+            <IFrame
+              srcDoc={html}
+              title="Generated Slides"
+              sandbox="allow-scripts allow-same-origin"
+            />
+          </SlideFrame>
         ) : (
           <EmptyState>
             <EmptyStateIcon>📊</EmptyStateIcon>
@@ -176,3 +191,4 @@ const SlideViewer: React.FC<SlideViewerProps> = ({
 };
 
 export default SlideViewer;
+

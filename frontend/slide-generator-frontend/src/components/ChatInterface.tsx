@@ -398,8 +398,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
           </ToolHeader>
           <ToolContent $isExpanded={isExpanded}>
             {toolGroup.messages.map((msg, idx) => {
-              const isRequest = msg.metadata?.title?.toLowerCase().includes('request') || 
-                               msg.metadata?.title?.toLowerCase().includes('tool call');
+              const isRequest = !!(msg.metadata?.title?.toLowerCase().includes('request') || 
+                               msg.metadata?.title?.toLowerCase().includes('tool call'));
               return (
                 <ToolMessage key={idx} $isRequest={isRequest}>
                   <ToolLabel>

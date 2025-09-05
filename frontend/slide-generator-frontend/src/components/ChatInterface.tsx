@@ -222,15 +222,19 @@ const TextInput = styled.textarea`
 `;
 
 const SendButton = styled.button`
-  padding: 12px 24px;
+  padding: 14px 16px;
   background: #667eea;
   color: white;
   border: none;
   border-radius: 8px;
   cursor: pointer;
   font-weight: 600;
+  font-size: 16px;
   transition: background-color 0.2s;
   align-self: flex-end;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 
   &:hover:not(:disabled) {
     background: #5a67d8;
@@ -552,7 +556,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
           disabled={isLoading}
         />
         <SendButton onClick={handleSendMessage} disabled={isLoading || !inputValue.trim()}>
-          {isLoading ? '⏳' : 'Send'}
+          {isLoading ? '⏳' : '➤'}
         </SendButton>
       </InputContainer>
     </ChatContainer>

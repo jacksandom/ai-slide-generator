@@ -28,8 +28,7 @@ const SlideDisplay = styled.div`
 `;
 
 const SlideFrame = styled.div`
-  width: 100%;
-  max-width: 800px;
+  width: 85%;
   aspect-ratio: 16/9;
   border: 2px solid #d1d5db;
   border-radius: 12px;
@@ -37,6 +36,18 @@ const SlideFrame = styled.div`
   background: white;
   box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
   position: relative;
+  
+  @media (min-width: 1200px) {
+    width: 90%;
+  }
+  
+  @media (min-width: 1600px) {
+    width: 95%;
+  }
+  
+  @media (max-width: 768px) {
+    width: 95%;
+  }
 `;
 
 const IFrame = styled.iframe`

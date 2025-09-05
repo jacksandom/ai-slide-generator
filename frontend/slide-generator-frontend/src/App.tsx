@@ -91,28 +91,6 @@ const SectionTitle = styled.h2`
   flex-shrink: 0;
 `;
 
-const TipsSection = styled.div`
-  margin-top: 15px;
-  padding: 15px;
-  background: #f0f4ff;
-  border-radius: 6px;
-  border-left: 3px solid #667eea;
-  flex-shrink: 0;
-`;
-
-const TipsTitle = styled.h3`
-  margin: 0 0 10px 0;
-  color: #374151;
-  font-size: 0.95rem;
-`;
-
-const TipsList = styled.ul`
-  margin: 0;
-  padding-left: 16px;
-  color: #6b7280;
-  line-height: 1.4;
-  font-size: 0.85rem;
-`;
 
 const App: React.FC = () => {
   const [slidesHtml, setSlidesHtml] = useState<string>('');
@@ -166,16 +144,6 @@ const App: React.FC = () => {
           <ChatSection>
             <SectionTitle>💬 Slide Creation Assistant</SectionTitle>
             <ChatInterface onSlideUpdate={refreshSlides} />
-            
-            <TipsSection>
-              <TipsTitle>💡 Tips:</TipsTitle>
-              <TipsList>
-                <li>Ask for specific slide types: title, agenda, content slides</li>
-                <li>Specify the number of slides you want</li>
-                <li>Request specific topics or themes</li>
-                <li>Use natural language - I'll understand what you need!</li>
-              </TipsList>
-            </TipsSection>
           </ChatSection>
           
           <SlideSection>

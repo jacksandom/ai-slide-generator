@@ -29,7 +29,7 @@ const Header = styled.div`
   background: #4f46e5;
   color: white;
   padding: 12px 20px;
-  text-align: center;
+  text-align: left;
   flex-shrink: 0;
 `;
 

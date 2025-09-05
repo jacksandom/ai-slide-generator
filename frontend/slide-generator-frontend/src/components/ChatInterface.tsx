@@ -203,12 +203,13 @@ const TextInput = styled.textarea`
   border: 1px solid #d1d5db;
   border-radius: 8px;
   resize: vertical;
-  min-height: 60px;
-  max-height: 120px;
+  min-height: 100px;
+  max-height: 200px;
   font-family: inherit;
   font-size: 14px;
   outline: none;
   transition: border-color 0.2s;
+  line-height: 1.5;
 
   &:focus {
     border-color: #667eea;
@@ -507,7 +508,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
       <MessagesContainer>
         {groupedMessages.length === 0 ? (
           <PlaceholderMessage>
-            👋 Hi! I'm your AI slide creation assistant. Send me a message to get started!
+            👋 Hi! I'm your AI slide creation assistant. I can create bespoke presentations leveraging our proprietary assets as well as public information from the Internet
           </PlaceholderMessage>
         ) : (
           groupedMessages.map((item, index) => {
@@ -547,7 +548,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder="Describe the slides you want to create..."
+          placeholder="👋 Hi! I'm your AI slide creation assistant. I can create bespoke presentations leveraging our proprietary assets as well as public information from the Internet"
           disabled={isLoading}
         />
         <SendButton onClick={handleSendMessage} disabled={isLoading || !inputValue.trim()}>

@@ -29,6 +29,8 @@ const SlideDisplay = styled.div`
 
 const SlideFrame = styled.div`
   width: 85%;
+  max-width: 90%;
+  max-height: 80%;
   aspect-ratio: 16/9;
   border: 2px solid #d1d5db;
   border-radius: 12px;
@@ -39,14 +41,17 @@ const SlideFrame = styled.div`
   
   @media (min-width: 1200px) {
     width: 90%;
+    max-height: 75%;
   }
   
   @media (min-width: 1600px) {
     width: 95%;
+    max-height: 70%;
   }
   
   @media (max-width: 768px) {
     width: 95%;
+    max-height: 85%;
   }
 `;
 

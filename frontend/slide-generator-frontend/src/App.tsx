@@ -26,23 +26,17 @@ const ContentWrapper = styled.div`
 `;
 
 const Header = styled.div`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #4f46e5;
   color: white;
-  padding: 20px 30px;
+  padding: 12px 20px;
   text-align: center;
   flex-shrink: 0;
 `;
 
 const Title = styled.h1`
-  margin: 0 0 8px 0;
-  font-size: 2rem;
-  font-weight: 700;
-`;
-
-const Subtitle = styled.p`
   margin: 0;
-  font-size: 1rem;
-  opacity: 0.9;
+  font-size: 1.5rem;
+  font-weight: 600;
 `;
 
 const MainContent = styled.div`
@@ -136,8 +130,7 @@ const App: React.FC = () => {
     <AppContainer>
       <ContentWrapper>
         <Header>
-          <Title>🎨 EY Slide Generator</Title>
-          <Subtitle>Create professional slide decks using natural language with AI assistance</Subtitle>
+          <Title>AI Slide Generator</Title>
         </Header>
         
         <MainContent>

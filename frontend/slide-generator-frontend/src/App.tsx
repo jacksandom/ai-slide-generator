@@ -5,37 +5,43 @@ import SlideViewer from './components/SlideViewer';
 import './App.css';
 
 const AppContainer = styled.div`
-  min-height: 100vh;
+  height: 100vh;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 20px;
+  padding: 10px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 `;
 
 const ContentWrapper = styled.div`
-  max-width: 1400px;
-  margin: 0 auto;
+  flex: 1;
   background: white;
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 `;
 
 const Header = styled.div`
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
-  padding: 30px 40px;
+  padding: 20px 30px;
   text-align: center;
+  flex-shrink: 0;
 `;
 
 const Title = styled.h1`
-  margin: 0 0 10px 0;
-  font-size: 2.5rem;
+  margin: 0 0 8px 0;
+  font-size: 2rem;
   font-weight: 700;
 `;
 
 const Subtitle = styled.p`
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 1rem;
   opacity: 0.9;
 `;
 
@@ -43,7 +49,8 @@ const MainContent = styled.div`
   display: grid;
   grid-template-columns: 1fr 2fr;
   gap: 0;
-  min-height: 600px;
+  flex: 1;
+  overflow: hidden;
 
   @media (max-width: 1024px) {
     grid-template-columns: 1fr;
@@ -51,9 +58,13 @@ const MainContent = styled.div`
 `;
 
 const ChatSection = styled.div`
-  padding: 30px;
+  padding: 20px;
   border-right: 1px solid #e0e7ff;
   background: #fafbff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
 
   @media (max-width: 1024px) {
     border-right: none;
@@ -62,41 +73,45 @@ const ChatSection = styled.div`
 `;
 
 const SlideSection = styled.div`
-  padding: 30px;
+  padding: 20px;
   background: #f5f5f5;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  overflow: hidden;
+  min-height: 0;
 `;
 
 const SectionTitle = styled.h2`
-  margin: 0 0 20px 0;
-  font-size: 1.5rem;
+  margin: 0 0 15px 0;
+  font-size: 1.2rem;
   color: #374151;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  flex-shrink: 0;
 `;
 
 const TipsSection = styled.div`
-  margin-top: 30px;
-  padding: 20px;
+  margin-top: 15px;
+  padding: 15px;
   background: #f0f4ff;
-  border-radius: 8px;
-  border-left: 4px solid #667eea;
+  border-radius: 6px;
+  border-left: 3px solid #667eea;
+  flex-shrink: 0;
 `;
 
 const TipsTitle = styled.h3`
-  margin: 0 0 15px 0;
+  margin: 0 0 10px 0;
   color: #374151;
-  font-size: 1.1rem;
+  font-size: 0.95rem;
 `;
 
 const TipsList = styled.ul`
   margin: 0;
-  padding-left: 20px;
+  padding-left: 16px;
   color: #6b7280;
-  line-height: 1.6;
+  line-height: 1.4;
+  font-size: 0.85rem;
 `;
 
 const App: React.FC = () => {

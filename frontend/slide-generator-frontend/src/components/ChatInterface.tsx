@@ -18,7 +18,8 @@ interface ChatInterfaceProps {
 const ChatContainer = styled.div`
   display: flex;
   flex-direction: column;
-  height: 500px;
+  flex: 1;
+  min-height: 0;
 `;
 
 const MessagesContainer = styled.div`
@@ -29,7 +30,7 @@ const MessagesContainer = styled.div`
   padding: 16px;
   background: white;
   margin-bottom: 16px;
-  max-height: 400px;
+  min-height: 0;
 `;
 
 const Message = styled.div<{ $isUser: boolean }>`

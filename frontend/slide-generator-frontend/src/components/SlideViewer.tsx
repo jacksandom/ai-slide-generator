@@ -12,18 +12,19 @@ interface SlideViewerProps {
 const ViewerContainer = styled.div`
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 `;
 
 const SlideDisplay = styled.div`
   flex: 1;
   display: flex;
   justify-content: center;
-  align-items: flex-start;
+  align-items: center;
   padding: 20px;
   margin-bottom: 20px;
   position: relative;
-  min-height: 500px;
+  min-height: 0;
 `;
 
 const SlideFrame = styled.div`

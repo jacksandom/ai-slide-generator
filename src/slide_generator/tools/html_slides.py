@@ -364,16 +364,84 @@ class SlideTheme:
           border-right: none;
           padding-right: 0;
         }}
-        /* Custom slide content styling */
+        /* Custom slide content styling (for visualisations) */
         .reveal .custom-content {{
           margin-top: 16px;
           line-height: 1.6;
+          flex: 1 1 auto;       /* allow custom area to take remaining height */
+          min-height: 0;         /* enable child overflow scrolling */
+          overflow: auto;        /* internal scroll if visual is tall */
         }}
-        .reveal .custom-content img, .reveal .custom-content svg, .reveal .custom-content canvas {{
-          max-width: 100%; height: auto; display: block;
+        .reveal .custom-content img,
+        .reveal .custom-content svg,
+        .reveal .custom-content canvas {{
+          width: 100% !important;   /* scale to container width */
+          height: auto !important;  /* preserve aspect ratio */
+          max-height: 100%;
+          display: block;
+          margin: 0 auto;
+          object-fit: contain;
         }}
-        .reveal .columns img, .reveal .columns svg, .reveal .columns canvas {{
-          max-width: 100%; height: auto; display: block; margin: 0 auto;
+        /* Clamp SVG/D3 text sizes inside visuals to avoid overflow */
+        .reveal .custom-content svg text {{
+          font-size: clamp(10px, 1.6vw, {max(self.body_font_size_px-2, 12)}px);
+        }}
+        /* Normalize inline font sizes and heading scales inside custom HTML */
+        .reveal .custom-content {{
+          font-size: clamp(11px, 1.3vw, {max(self.body_font_size_px-2, 14)}px);
+        }}
+        .reveal .custom-content *[style*="font-size"] {{
+          font-size: inherit !important;
+        }}
+        .reveal .custom-content h1 {{
+          font-size: clamp(20px, 3vw, {max(self.title_font_size_px-8, 24)}px);
+          line-height: 1.2;
+          margin: 0 0 8px 0;
+          font-weight: 600;
+        }}
+        .reveal .custom-content h2 {{
+          font-size: clamp(18px, 2.4vw, {max(self.subtitle_font_size_px-2, 20)}px);
+          line-height: 1.25;
+          margin: 0 0 8px 0;
+          font-weight: 600;
+        }}
+        .reveal .custom-content h3 {{
+          font-size: clamp(14px, 1.6vw, {max(self.body_font_size_px, 16)}px);
+          line-height: 1.3;
+          margin: 0 0 8px 0;
+          font-weight: 600;
+        }}
+        .reveal .custom-content h4 {{
+          font-size: clamp(13px, 1.4vw, {max(self.body_font_size_px-1, 15)}px);
+          line-height: 1.35;
+          margin: 0 0 6px 0;
+          font-weight: 600;
+        }}
+        .reveal .custom-content *,
+        .reveal .custom-content *::before,
+        .reveal .custom-content *::after {{
+          box-sizing: border-box;
+          max-width: 100% !important;
+        }}
+        /* Cap excessive inline spacings coming from LLM HTML */
+        .reveal .custom-content [style*="padding"] {{
+          padding: min(16px, 2vw) !important;
+        }}
+        .reveal .custom-content [style*="margin-bottom"] {{
+          margin-bottom: min(12px, 1.8vw) !important;
+        }}
+        .reveal .custom-content [style*="gap"] {{
+          gap: min(12px, 1.6vw) !important;
+        }}
+        .reveal .columns img,
+        .reveal .columns svg,
+        .reveal .columns canvas {{
+          max-width: 100%;
+          height: auto;
+          max-height: 100%;
+          display: block;
+          margin: 0 auto;
+          object-fit: contain;
         }}
         /* Optional brand chrome */
         .brand-header {{
@@ -720,13 +788,29 @@ class HtmlDeck:
         self.set_slide_at_position(0, slide)
 
     def add_agenda_slide(self, *, agenda_points: List[str]) -> None:
-        """Add or replace the agenda slide at position 1 (second slide)"""
-        slide = Slide(
+        """Insert agenda at position 1, or update existing agenda in-place.
+
+        - If an agenda slide already exists anywhere, update it (do not change order)
+        - Otherwise, insert at canonical position 1 (second slide) without replacing others
+        """
+        new_slide = Slide(
             title="Agenda",
             slide_type="agenda",
             metadata={"agenda_points": agenda_points}
         )
-        self.set_slide_at_position(1, slide)
+
+        # Try to find an existing agenda slide
+        try:
+            existing_idx = next(i for i, s in enumerate(self._slides) if getattr(s, "slide_type", "") == "agenda")
+        except StopIteration:
+            existing_idx = -1
+
+        if existing_idx >= 0:
+            # Update in place
+            self._slides[existing_idx] = new_slide
+        else:
+            # Insert at position 1 (second slide) and shift others to the right
+            self.insert_slide_at_position(1, new_slide)
 
     def add_content_slide(
         self,
@@ -823,8 +907,15 @@ class HtmlDeck:
 
     def tool_add_agenda_slide(self, **kwargs) -> str:
         """Tool function for add_agenda_slide"""  
+        before = len(self._slides)
         self.add_agenda_slide(**kwargs)
-        return f"Agenda slide added/updated at position 1"
+        after = len(self._slides)
+        if after > before:
+            return f"Agenda slide inserted at position 1 (second slide). Deck now has {after} slides."
+        else:
+            # Updated existing agenda
+            idx = next((i for i, s in enumerate(self._slides) if getattr(s, 'slide_type', '') == 'agenda'), 1)
+            return f"Agenda slide updated at position {idx}"
 
     def tool_add_content_slide(self, **kwargs) -> str:
         """Tool function for add_content_slide"""
@@ -945,6 +1036,8 @@ class HtmlDeck:
       embedded: true,      // Better for iframe embedding
       backgroundTransition: 'fade'
     }});
+    // Expose deck instance for embedded previews
+    try {{ window.__DECK__ = deck; }} catch (e) {{}}
     
     // Initialize and focus for keyboard events
     deck.initialize().then(() => {{
@@ -1002,6 +1095,28 @@ class HtmlDeck:
           }}
         }}
       }}
+      // Notify parent that deck is ready
+      try {{
+        window.parent?.postMessage({{ type: 'READY', total: deck.getTotalSlides() }}, '*');
+      }} catch (e) {{}}
+    }});
+
+    // Cross-frame navigation: listen for NAVIGATE_TO and emit SLIDE_CHANGED
+    window.addEventListener('message', (event) => {{
+      try {{
+        const data = event?.data;
+        if (!data || typeof data !== 'object') return;
+        if (data.type === 'NAVIGATE_TO') {{
+          const idx = Number(data.index) || 0;
+          deck.slide(idx, 0, 0);
+        }}
+      }} catch (e) {{}}
+    }});
+
+    deck.on('slidechanged', (ev) => {{
+      try {{
+        window.parent?.postMessage({{ type: 'SLIDE_CHANGED', index: ev.indexh }}, '*');
+      }} catch (e) {{}}
     }});
   </script>
 </body>

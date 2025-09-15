@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple, Union, Dict, Optional, Any
+import re
 import json
 
 
@@ -117,7 +118,19 @@ class Slide:
         cols_html: List[str] = []
         for idx in range(num_columns):
             items = column_contents[idx] if idx < len(column_contents) else []
-            bullets = "".join(f"<li>{_escape(i)}</li>" for i in items)
+            # Sanitize incoming bullet text to avoid double bullets (e.g. leading '•', '-', '1)', 'a.' etc.)
+            def _sanitize_bullet_text(text: str) -> str:
+                if text is None:
+                    return ""
+                cleaned = str(text)
+                # Normalize spaces
+                cleaned = cleaned.replace('\u00A0', ' ')
+                cleaned = cleaned.strip()
+                # Remove any leading bullet-like markers and numbering, e.g., •, ◦, ●, ○, -, –, —, *, 1., 1), a., a)
+                cleaned = re.sub(r"^\s*(?:[\u2022\u2023\u25E6\u25CF\u25CB\u00B7\-\*\u2013\u2014]|(?:\d+|[A-Za-z])[\.)])\s+", "", cleaned)
+                return cleaned
+
+            bullets = "".join(f"<li>{_escape(_sanitize_bullet_text(i))}</li>" for i in items)
             cols_html.append(f"<div class=\"col\"><ul>{bullets}</ul></div>")
 
         dividers_class = " with-dividers" if num_columns > 1 else ""
@@ -195,24 +208,50 @@ class SlideTheme:
         body {{ background: {self.rgb(self.background_rgb)}; }}
         .reveal {{ font-family: {self.font_family}; }}
         .reveal h1.title, .reveal h2.title {{
-          font-size: {self.title_font_size_px}px;
+          font-size: clamp(20px, 3.2vw, {self.title_font_size_px}px);
           color: {self.rgb(self.title_color_rgb)};
         }}
         .reveal .subtitle {{
-          font-size: {self.subtitle_font_size_px}px;
+          font-size: clamp(14px, 2.2vw, {self.subtitle_font_size_px}px);
           color: {self.rgb(self.subtitle_color_rgb)};
         }}
         .reveal .body {{
-          font-size: {self.body_font_size_px}px;
+          font-size: clamp(12px, 2vw, {self.body_font_size_px}px);
           color: {self.rgb(self.body_color_rgb)};
+        }}
+        .reveal {{ height: 100vh; }}
+        .reveal .slides {{ height: 100%; }}
+        .reveal .slides section {{
+          height: 100%;
+          box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
         }}
         .reveal .columns {{
           display: grid;
           grid-template-columns: repeat(var(--cols), 1fr);
           gap: 24px;
           margin-top: 16px;
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: auto; /* internal scroll when tall */
         }}
-        .reveal .col ul {{ margin: 0; padding-left: 20px; }}
+        /* Tighter text for multi-column layouts */
+        .reveal .columns[style*="--cols:2"] {{ font-size: clamp(12px, 1.8vw, {max(self.body_font_size_px-2, 12)}px); }}
+        .reveal .columns[style*="--cols:3"] {{ font-size: clamp(11px, 1.6vw, {max(self.body_font_size_px-3, 11)}px); }}
+        .reveal .col ul {{ margin: 0; padding-left: 0; list-style: none !important; }}
+        .reveal .col ul li {{ position: relative; padding-left: 18px; margin: 6px 0; }}
+        .reveal .col ul li::marker {{ content: none; }}
+        .reveal .col ul li::before {{ content: '\\2022'; position: absolute; left: 0; top: 0; color: {self.rgb(self.body_color_rgb)}; font-weight: 700; }}
+        /* Ensure no double bullets anywhere */
+        .reveal .content-slide ul {{ margin: 0; padding-left: 0; list-style: none !important; }}
+        .reveal .content-slide li::marker {{ content: none; }}
+        .reveal .content-slide li::before {{ content: '\\2022'; position: absolute; left: 0; top: 0; color: {self.rgb(self.body_color_rgb)}; font-weight: 700; }}
+        .reveal .custom-content ul {{ margin: 0; padding-left: 0; list-style: none !important; }}
+        .reveal .custom-content li {{ position: relative; padding-left: 18px; margin: 6px 0; }}
+        .reveal .custom-content li::marker {{ content: none; }}
+        .reveal .custom-content li::before {{ content: '\\2022'; position: absolute; left: 0; top: 0; color: {self.rgb(self.body_color_rgb)}; font-weight: 700; }}
         /* Optional spacing tweaks */
         .reveal section {{ padding: 16px 24px; }}
         /* Title slide layout */
@@ -294,9 +333,11 @@ class SlideTheme:
           line-height: 1.8em;
           flex: 0 0 1.8em;
         }}
-        /* Content slide layout */
+        /* Content slide layout: allow Reveal to scale content to fit */
         .reveal .content-slide {{
           text-align: left;
+          display: flex;
+          flex-direction: column;
         }}
         .reveal .content-slide h2.title {{
           font-family: {self.title_font_family};
@@ -328,6 +369,12 @@ class SlideTheme:
           margin-top: 16px;
           line-height: 1.6;
         }}
+        .reveal .custom-content img, .reveal .custom-content svg, .reveal .custom-content canvas {{
+          max-width: 100%; height: auto; display: block;
+        }}
+        .reveal .columns img, .reveal .columns svg, .reveal .columns canvas {{
+          max-width: 100%; height: auto; display: block; margin: 0 auto;
+        }}
         /* Optional brand chrome */
         .brand-header {{
           position: absolute; left: 0; top: 0; right: 0;
@@ -353,6 +400,67 @@ class SlideTheme:
           width: auto;
           z-index: 1000;
           opacity: 0.9;
+          display: block; /* Always show when included */
+        }}
+        
+        
+        /* Hide navigation controls - focus on keyboard navigation */
+        .reveal .controls {{
+          display: none !important;
+        }}
+        
+        /* Center and style the slide number - but only show when we have real slides */
+        .reveal .slide-number {{
+          position: fixed !important;
+          bottom: 20px !important;
+          left: 50% !important;
+          transform: translateX(-50%) !important;
+          right: auto !important;
+          background: rgba(37, 99, 235, 0.9) !important;
+          color: white !important;
+          padding: 6px 12px !important;
+          border-radius: 16px !important;
+          font-weight: 500 !important;
+          font-size: 14px !important;
+          z-index: 1000 !important;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+          display: none !important; /* Hidden by default */
+        }}
+        
+        /* Only show slide number when we have valid content and it's properly formatted */
+        .reveal.has-real-slides .slide-number {{
+          display: block !important;
+        }}
+        
+        /* Hide slide number in all error cases */
+        .reveal .slide-number:empty,
+        .reveal .slide-number[data-total="0"],
+        .reveal:not(.has-slides) .slide-number {{
+          display: none !important;
+        }}
+        
+        /* Hide if it contains invalid text */
+        .reveal .slide-number:contains('NaN'),
+        .reveal .slide-number:contains('undefined') {{
+          display: none !important;
+        }}
+        
+        /* Ensure keyboard navigation works */
+        .reveal.focused {{
+          outline: none;
+        }}
+        
+        /* Message about keyboard navigation */
+        .reveal .navigation-hint {{
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background: rgba(0, 0, 0, 0.8);
+          color: white;
+          padding: 8px 12px;
+          border-radius: 6px;
+          font-size: 12px;
+          z-index: 1001;
         }}
         """
     
@@ -783,10 +891,10 @@ class HtmlDeck:
         header_html = f"<div class=\"brand-header\">{header_logo}</div>" if self.theme.header_bar_height_px else ""
         footer_html = f"<div class=\"brand-footer\">{footer}</div>" if footer else ""
         
-        # Add bottom-right logo if configured
+        # Only show bottom-right logo if there are actual slides
         bottom_right_logo_html = (
             f"<img class=\"bottom-right-logo\" src=\"{_escape(self.theme.bottom_right_logo_url)}\" alt=\"EY Parthenon Logo\"/>"
-            if self.theme.bottom_right_logo_url else ""
+            if self.theme.bottom_right_logo_url and len(self._slides) > 0 else ""
         )
         return f"""
 <!doctype html>
@@ -806,7 +914,7 @@ class HtmlDeck:
 </head>
 <body>
   {header_html}
-  <div class="reveal">
+  <div class="reveal{' has-slides' if len(self._slides) > 0 else ''}">
     <div class="slides">
       {slides}
     </div>
@@ -815,13 +923,86 @@ class HtmlDeck:
   {bottom_right_logo_html}
   <script src="https://unpkg.com/reveal.js/dist/reveal.js"></script>
   <script>
+    // Initialize Reveal.js with keyboard-focused navigation
     const deck = new Reveal({{
       hash: true,
-      slideNumber: true,
+      slideNumber: 'c/t',  // Current slide / Total slides
       transition: 'slide',
-      center: false
+      center: false,
+      controls: false,     // Hide visual controls, use keyboard only
+      keyboard: {{
+        // Enable all keyboard shortcuts
+        13: 'next',        // Enter key
+        32: 'next',        // Spacebar  
+        37: 'prev',        // Left arrow
+        39: 'next',        // Right arrow
+        38: 'prev',        // Up arrow
+        40: 'next',        // Down arrow
+        72: 'prev',        // H key (back)
+        76: 'next',        // L key (forward)
+      }},
+      touch: true,
+      embedded: true,      // Better for iframe embedding
+      backgroundTransition: 'fade'
     }});
-    deck.initialize();
+    
+    // Initialize and focus for keyboard events
+    deck.initialize().then(() => {{
+      // Ensure the deck can receive keyboard events
+      const reveal = document.querySelector('.reveal');
+      if (reveal) {{
+        reveal.setAttribute('tabindex', '0');
+        reveal.focus();
+        
+        // Add click handler to maintain focus
+        reveal.addEventListener('click', () => {{
+          reveal.focus();
+        }});
+        
+        // Update slide number display to prevent NaN and only show when appropriate
+        deck.on('slidechanged', (event) => {{
+          const reveal = document.querySelector('.reveal');
+          const slideNumber = document.querySelector('.reveal .slide-number');
+          const hasActualSlides = document.querySelectorAll('.reveal .slides section').length > 0;
+          
+          if (slideNumber && reveal && hasActualSlides) {{
+            const current = event.indexh + 1;
+            const total = deck.getTotalSlides();
+            if (total > 0 && !isNaN(current) && !isNaN(total)) {{
+              reveal.classList.add('has-real-slides');
+              slideNumber.textContent = `${{current}}/${{total}}`;
+              slideNumber.setAttribute('data-total', total.toString());
+            }} else {{
+              reveal.classList.remove('has-real-slides');
+              slideNumber.style.display = 'none';
+            }}
+          }}
+        }});
+        
+        // Check if we have real slide content and set appropriate classes
+        const reveal = document.querySelector('.reveal');
+        const hasActualSlides = document.querySelectorAll('.reveal .slides section').length > 0;
+        const slideNumber = document.querySelector('.reveal .slide-number');
+        
+        if (hasActualSlides && reveal) {{
+          reveal.classList.add('has-real-slides');
+          const total = deck.getTotalSlides();
+          if (total > 0 && !isNaN(total) && slideNumber) {{
+            slideNumber.textContent = `1/${{total}}`;
+            slideNumber.setAttribute('data-total', total.toString());
+          }}
+        }} else {{
+          if (reveal) {{
+            reveal.classList.remove('has-real-slides');
+          }}
+          if (slideNumber) {{
+            slideNumber.textContent = '';
+            slideNumber.setAttribute('data-total', '0');
+            slideNumber.style.display = 'none';
+          }}
+        }}
+      }}
+    }});
   </script>
 </body>
 <!-- Generated by html_slides.py (Reveal.js) -->

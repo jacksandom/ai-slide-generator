@@ -21,7 +21,8 @@ from slide_generator.config import config
 from databricks.sdk import WorkspaceClient
 
 # Initialize Databricks client and components
-ws = WorkspaceClient(product='slide-generator')
+# Use explicit profile so local dev can auth with the intended workspace
+ws = WorkspaceClient(profile='e2-demo-field-eng-aws', product='slide-generator')
 
 def get_logo_base64():
     """Load the EY-Parthenon logo and encode it as base64 for embedding in HTML."""

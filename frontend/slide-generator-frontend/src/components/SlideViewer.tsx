@@ -3,9 +3,6 @@ import styled from 'styled-components';
 
 interface SlideViewerProps {
   html: string;
-  onRefresh: () => void;
-  onReset: () => void;
-  onExport: () => void;
   isRefreshing: boolean;
 }
 
@@ -14,6 +11,8 @@ const ViewerContainer = styled.div`
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  font-weight: 400;
 `;
 
 const SlideDisplay = styled.div`
@@ -62,58 +61,6 @@ const IFrame = styled.iframe`
   background: white;
 `;
 
-const ButtonContainer = styled.div`
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-`;
-
-const Button = styled.button<{ $variant?: 'primary' | 'secondary' | 'danger' }>`
-  padding: 10px 20px;
-  border: none;
-  border-radius: 6px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  
-  ${props => {
-    switch (props.$variant) {
-      case 'primary':
-        return `
-          background: #667eea;
-          color: white;
-          &:hover:not(:disabled) {
-            background: #5a67d8;
-          }
-        `;
-      case 'danger':
-        return `
-          background: #ef4444;
-          color: white;
-          &:hover:not(:disabled) {
-            background: #dc2626;
-          }
-        `;
-      default:
-        return `
-          background: #f3f4f6;
-          color: #374151;
-          border: 1px solid #d1d5db;
-          &:hover:not(:disabled) {
-            background: #e5e7eb;
-          }
-        `;
-    }
-  }}
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-`;
 
 const EmptyState = styled.div`
   display: flex;
@@ -133,6 +80,7 @@ const EmptyStateIcon = styled.div`
 
 const EmptyStateText = styled.div`
   font-size: 1.1rem;
+  font-weight: 600;
   margin-bottom: 8px;
 `;
 
@@ -159,9 +107,6 @@ const LoadingOverlay = styled.div`
 
 const SlideViewer: React.FC<SlideViewerProps> = ({
   html,
-  onRefresh,
-  onReset,
-  onExport,
   isRefreshing
 }) => {
   const hasSlides = html && html.trim().length > 0;
@@ -191,18 +136,6 @@ const SlideViewer: React.FC<SlideViewerProps> = ({
           </EmptyState>
         )}
       </SlideDisplay>
-      
-      <ButtonContainer>
-        <Button onClick={onRefresh} disabled={isRefreshing}>
-          🔄 Refresh Slides
-        </Button>
-        <Button onClick={onReset}>
-          🗑️ Reset Slides
-        </Button>
-        <Button onClick={onExport} $variant="primary">
-          💾 Export Slides
-        </Button>
-      </ButtonContainer>
     </ViewerContainer>
   );
 };

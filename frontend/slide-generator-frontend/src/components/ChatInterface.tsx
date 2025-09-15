@@ -20,13 +20,15 @@ const ChatContainer = styled.div`
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  font-weight: 400;
 `;
 
 const MessagesContainer = styled.div`
   flex: 1;
   overflow-y: auto;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border-radius: 16px;
   padding: 16px;
   background: white;
   margin-bottom: 16px;
@@ -43,8 +45,8 @@ const Message = styled.div<{ $isUser: boolean }>`
 const MessageBubble = styled.div<{ $isUser: boolean }>`
   max-width: 85%;
   padding: 12px 16px;
-  border-radius: 18px;
-  background: ${props => props.$isUser ? '#667eea' : '#f3f4f6'};
+  border-radius: 16px;
+  background: ${props => props.$isUser ? '#1A9AFA' : '#f3f4f6'};
   color: ${props => props.$isUser ? 'white' : '#374151'};
   word-wrap: break-word;
   line-height: 1.5;
@@ -105,7 +107,7 @@ const MarkdownContent = styled.div`
   }
   
   blockquote {
-    border-left: 3px solid #667eea;
+    border-left: 3px solid #1A9AFA;
     margin: 0.5em 0;
     padding-left: 1em;
     font-style: italic;
@@ -120,7 +122,7 @@ const MarkdownContent = styled.div`
   }
   
   a {
-    color: #4f46e5;
+    color: #1A9AFA;
     text-decoration: none;
     
     &:hover {
@@ -152,7 +154,7 @@ const ToolHeader = styled.button<{ $isExpanded: boolean }>`
   justify-content: space-between;
   font-size: 13px;
   font-weight: 600;
-  color: #6366f1;
+  color: #1A9AFA;
   transition: background-color 0.2s;
 
   &:hover {
@@ -201,7 +203,7 @@ const TextInput = styled.textarea`
   flex: 1;
   padding: 12px 16px;
   border: 1px solid #d1d5db;
-  border-radius: 8px;
+  border-radius: 12px;
   resize: vertical;
   min-height: 100px;
   max-height: 200px;
@@ -212,8 +214,8 @@ const TextInput = styled.textarea`
   line-height: 1.5;
 
   &:focus {
-    border-color: #667eea;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    border-color: #1A9AFA;
+    box-shadow: 0 0 0 3px rgba(26, 154, 250, 0.1);
   }
 
   &::placeholder {
@@ -223,10 +225,10 @@ const TextInput = styled.textarea`
 
 const SendButton = styled.button`
   padding: 14px 16px;
-  background: #667eea;
+  background: #1A9AFA;
   color: white;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
   font-weight: 600;
   font-size: 16px;
@@ -237,7 +239,7 @@ const SendButton = styled.button`
   justify-content: center;
 
   &:hover:not(:disabled) {
-    background: #5a67d8;
+    background: #1680D4;
   }
 
   &:disabled {
@@ -512,7 +514,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
       <MessagesContainer>
         {groupedMessages.length === 0 ? (
           <PlaceholderMessage>
-            👋 Hi! I'm your AI slide creation assistant. I can create bespoke presentations leveraging our proprietary assets as well as public information from the Internet
+            Hi! I'm your AI slide creation assistant. I can create bespoke presentations leveraging our proprietary assets as well as public information from the Internet
           </PlaceholderMessage>
         ) : (
           groupedMessages.map((item, index) => {
@@ -552,7 +554,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder="👋 Hi! I'm your AI slide creation assistant. I can create bespoke presentations leveraging our proprietary assets as well as public information from the Internet"
+          placeholder="Hi! I'm your AI slide creation assistant. I can create bespoke presentations leveraging our proprietary assets as well as public information from the Internet"
           disabled={isLoading}
         />
         <SendButton onClick={handleSendMessage} disabled={isLoading || !inputValue.trim()}>

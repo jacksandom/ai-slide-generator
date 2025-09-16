@@ -338,6 +338,10 @@ class SlideTheme:
           text-align: left;
           display: flex;
           flex-direction: column;
+          flex: 1 1 auto;        /* allow main content to fill available height */
+          min-height: 0;          /* enable children to scroll instead of overflowing */
+          overflow: auto;         /* internal scroll if total content exceeds slide */
+          padding-bottom: 40px;   /* keep space above footer/logo */
         }}
         .reveal .content-slide h2.title {{
           font-family: {self.title_font_family};
@@ -371,6 +375,7 @@ class SlideTheme:
           flex: 1 1 auto;       /* allow custom area to take remaining height */
           min-height: 0;         /* enable child overflow scrolling */
           overflow: auto;        /* internal scroll if visual is tall */
+          max-height: calc(100% - 120px); /* reserve space for title/subtitle/chrome */
         }}
         .reveal .custom-content img,
         .reveal .custom-content svg,
@@ -1095,6 +1100,50 @@ class HtmlDeck:
           }}
         }}
       }}
+      // Auto fit custom HTML content to slide viewport by scaling
+      const fitCustomContent = () => {{
+        try {{
+          const reveal = document.querySelector('.reveal');
+          if (!reveal) return;
+          const section = document.querySelector('.reveal .slides section.present');
+          if (!section) return;
+          const target = section.querySelector('.custom-content');
+          if (!target) return;
+
+          // Available space inside the slide (reserve room for title/subtitle)
+          const reservedTop = 120;   // px
+          const reservedSides = 48;  // px total
+          const availW = Math.max(0, reveal.clientWidth - reservedSides);
+          const availH = Math.max(0, reveal.clientHeight - reservedTop);
+
+          // Reset transforms to measure natural size
+          target.style.transform = 'none';
+          target.style.transformOrigin = 'top left';
+          target.style.overflow = 'hidden';
+
+          const naturalW = target.scrollWidth || target.clientWidth || 1;
+          const naturalH = target.scrollHeight || target.clientHeight || 1;
+          const scaleW = availW / naturalW;
+          const scaleH = availH / naturalH;
+          const scale = Math.min(1, scaleW, scaleH);
+
+          target.style.transform = `scale(${{scale}})`;
+        }} catch (e) {{}}
+      }};
+
+      // Fit on init, on slide change, and on resize/content mutation
+      fitCustomContent();
+      deck.on('slidechanged', fitCustomContent);
+      window.addEventListener('resize', fitCustomContent);
+      try {{
+        const ro = new ResizeObserver(() => fitCustomContent());
+        ro.observe(document.querySelector('.reveal'));
+        const mo = new MutationObserver((m) => fitCustomContent());
+        const present = document.querySelector('.reveal .slides section.present');
+        if (present) mo.observe(present, {{ subtree: true, childList: true, attributes: true }});
+        setTimeout(fitCustomContent, 300);
+        setTimeout(fitCustomContent, 1000);
+      }} catch (e) {{}}
       // Notify parent that deck is ready
       try {{
         window.parent?.postMessage({{ type: 'READY', total: deck.getTotalSlides() }}, '*');

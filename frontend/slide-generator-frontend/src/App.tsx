@@ -237,9 +237,20 @@ const App: React.FC = () => {
 
   const exportSlides = async () => {
     try {
-      const response = await fetch('http://localhost:8000/slides/export', { method: 'POST' });
-      const data = await response.json();
-      alert(data.message);
+      const res = await fetch('http://localhost:8000/slides/export/pptx');
+      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      // Try to infer filename from response headers, else fallback
+      const cd = res.headers.get('Content-Disposition');
+      const match = cd && cd.match(/filename="?([^";]+)"?/i);
+      a.download = match ? match[1] : 'slides_export.pptx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error exporting slides:', error);
     }

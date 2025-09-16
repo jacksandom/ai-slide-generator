@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 import uvicorn
 
@@ -273,6 +273,37 @@ async def export_slides():
         return {"message": result, "path": str(output_path)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error exporting slides: {str(e)}")
+
+@app.get("/slides/export/pptx")
+async def export_slides_pptx() -> FileResponse:
+    """Export the current deck to a PPTX file and stream it back.
+
+    Uses the HtmlToPptxConverter from tools/html_to_pptx.py (pulled from export-visuals branch).
+    """
+    try:
+        from slide_generator.tools.html_to_pptx import HtmlToPptxConverter
+        from slide_generator.config import get_output_path
+
+        # Compose output path (timestamped)
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = get_output_path(f"slides_{ts}.pptx")
+
+        # Ensure directory exists
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Convert
+        converter = HtmlToPptxConverter(html_deck)
+        await converter.convert_to_pptx(str(output_path), include_charts=True)
+
+        # Stream file
+        return FileResponse(
+            path=str(output_path),
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            filename=output_path.name,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error exporting PPTX: {str(e)}")
 
 @app.get("/conversation/{session_id}")
 async def get_conversation(session_id: str):

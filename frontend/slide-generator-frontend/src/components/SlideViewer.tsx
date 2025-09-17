@@ -23,9 +23,9 @@ const SlideArea = styled.div`
 `;
 
 const SlideListPanel = styled.div`
-  width: 280px;
-  min-width: 240px;
-  max-width: 320px;
+  width: 300px;
+  min-width: 280px;
+  max-width: 340px;
   background: #FFFFFF;
   border: 1px solid #e5e7eb;
   border-radius: 16px;
@@ -118,9 +118,9 @@ const SlideDisplay = styled.div`
 `;
 
 const SlideFrame = styled.div`
-  width: 85%;
-  max-width: 90%;
-  max-height: 80%;
+  width: 96%;
+  max-width: 98%;
+  max-height: 90%;
   aspect-ratio: 16/9;
   border: 2px solid #d1d5db;
   border-radius: 12px;
@@ -130,18 +130,18 @@ const SlideFrame = styled.div`
   position: relative;
   
   @media (min-width: 1200px) {
-    width: 90%;
-    max-height: 75%;
+    width: 97%;
+    max-height: 92%;
   }
   
   @media (min-width: 1600px) {
-    width: 95%;
-    max-height: 70%;
+    width: 98%;
+    max-height: 94%;
   }
   
   @media (max-width: 768px) {
     width: 95%;
-    max-height: 85%;
+    max-height: 88%;
   }
 `;
 

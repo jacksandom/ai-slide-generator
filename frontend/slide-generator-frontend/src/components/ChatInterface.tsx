@@ -284,8 +284,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    // While generating, always follow the latest message
+    if (isLoading) {
+      scrollToBottom();
+      return;
+    }
+    // After completion, only auto-scroll if the user is near the bottom
+    const container = messagesEndRef.current?.parentElement;
+    const nearBottom = container
+      ? (container.scrollHeight - container.scrollTop - container.clientHeight) < 120
+      : true;
+    if (nearBottom) scrollToBottom();
+  }, [messages, isLoading]);
 
   const toggleToolExpansion = (toolId: string) => {
     setExpandedTools(prev => {
@@ -310,38 +320,26 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
       
       if (newMessageCount !== lastMessageCount) {
         console.log('Message count changed, updating UI');
-        console.log('New messages:', newMessages);
-        setMessages([...newMessages]); // Force new array to trigger re-render
-        setLastMessageCount(newMessageCount);
-        onSlideUpdate(); // Refresh slides when new messages arrive
-      }
-      
-      // Check if conversation is complete
-      if (newMessages.length > 0) {
-        const lastMessage = newMessages[newMessages.length - 1];
-        const lastFewMessages = newMessages.slice(-3); // Look at last 3 messages
-        
-        // Stop polling if we have a final assistant response (not a tool-related message)
-        if (lastMessage?.role === 'assistant') {
-          // Look for tool result followed by assistant response pattern
-          const hasToolResult = lastFewMessages.some((msg: ChatMessage) => msg.metadata?.title?.includes('Tool result'));
-          const hasFollowupResponse = lastMessage && !lastMessage.metadata?.title;
-          
-          // Or just a regular assistant response without tool usage
-          if ((hasToolResult && hasFollowupResponse) || (!hasToolResult && !lastMessage.metadata?.title)) {
-            console.log('Conversation appears complete, stopping polling after a few more checks');
-            // Give it a few more polls to make sure
-            setTimeout(() => {
-              if (pollingRef.current) {
-                clearInterval(pollingRef.current);
-                pollingRef.current = null;
-                setIsLoading(false);
-                console.log('Polling stopped - conversation complete');
-              }
-            }, 3000); // Wait 3 seconds to confirm completion
-          }
+        // De-duplicate consecutive identical messages (role + title + content)
+        const cleaned: ChatMessage[] = [];
+        for (const m of (newMessages as ChatMessage[])) {
+          const prev = cleaned[cleaned.length - 1];
+          const same = prev && prev.role === m.role && prev.content === m.content && (prev.metadata?.title || '') === (m.metadata?.title || '');
+          if (!same) cleaned.push(m);
         }
+        setMessages([...cleaned]);
+        setLastMessageCount(newMessageCount);
+        // Force scroll to bottom right after render to follow live updates
+        setTimeout(() => {
+          try { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); } catch {}
+        }, 0);
+        // Refresh slides only when a tool result message lands
+        const last = cleaned[cleaned.length - 1];
+        const shouldRefresh = !!last?.metadata?.title && /tool result/i.test(last.metadata.title);
+        if (shouldRefresh) onSlideUpdate();
+        setIsLoading(false); // hide spinner once we see progress
       }
+
     } catch (error: any) {
       console.error('Error polling for updates:', error);
       console.error('Error details:', error.response?.data || error.message);
@@ -353,7 +351,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
     }
-    pollingRef.current = setInterval(pollForUpdates, 1000); // Poll every second
+    pollingRef.current = setInterval(pollForUpdates, 600); // Poll a bit faster to catch staged steps
   };
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -420,7 +418,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
   // Group messages into conversation flows and tool groups
   const groupMessages = (messages: ChatMessage[]) => {
     const groups: (ChatMessage | ToolGroup)[] = [];
-    let currentToolGroup: ChatMessage[] = [];
     let toolGroupId = 0;
 
     for (let i = 0; i < messages.length; i++) {
@@ -431,30 +428,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
       );
 
       if (isToolMessage) {
-        currentToolGroup.push(message);
+        // Render each tool message in its own accordion
+        groups.push({ id: `tool-group-${toolGroupId++}`, messages: [message], isExpanded: false });
       } else {
-        // If we have accumulated tool messages, create a tool group
-        if (currentToolGroup.length > 0) {
-          groups.push({
-            id: `tool-group-${toolGroupId++}`,
-            messages: [...currentToolGroup],
-            isExpanded: false
-          });
-          currentToolGroup = [];
-        }
-        
-        // Add the regular message
         groups.push(message);
       }
-    }
-
-    // Handle any remaining tool messages
-    if (currentToolGroup.length > 0) {
-      groups.push({
-        id: `tool-group-${toolGroupId++}`,
-        messages: [...currentToolGroup],
-        isExpanded: false
-      });
     }
 
     return groups;

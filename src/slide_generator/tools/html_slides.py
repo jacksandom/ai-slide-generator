@@ -387,6 +387,9 @@ class SlideTheme:
           margin: 0 auto;
           object-fit: contain;
         }}
+        /* Fit user-provided full-slide HTML (e.g., .slide-container) to the viewer */
+        .reveal .custom-content .slide-container {{ width: 100% !important; max-width: 100% !important; }}
+        .reveal .custom-content .content-container {{ padding-left: clamp(40px, 6vw, 100px); padding-right: clamp(40px, 6vw, 100px); }}
         /* Clamp SVG/D3 text sizes inside visuals to avoid overflow */
         .reveal .custom-content svg text {{
           font-size: clamp(10px, 1.6vw, {max(self.body_font_size_px-2, 12)}px);

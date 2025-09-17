@@ -5,11 +5,13 @@ import json
 import base64
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import re
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 import uvicorn
+import time
 
 # Import slide generator modules
 import sys
@@ -63,6 +65,1257 @@ app.add_middleware(
 
 # Global conversation state (in production, use proper session management)
 conversations: Dict[str, Dict] = {}
+
+# --- Demo static mode -------------------------------------------------------
+# When enabled, any user prompt will render a predefined set of static slides
+# without calling the LLM or tools. Useful for controlled demos.
+DEMO_STATIC_MODE: bool = True
+
+# Demo slide 1 (scoped CSS, no Tailwind dependency)
+DEMO_SLIDES: List[str] = [
+    """
+    <div class=\"demo-title-slide\">
+      <style>
+        .demo-title-slide { font-family: Arial, sans-serif; color: #2E2E38; }
+        .demo-title-slide .slide-container { width: 1280px; min-height: 720px; position: relative; overflow: hidden; background: #FFFFFF; }
+        .demo-title-slide .accent-blue { color: #1A9AFA; }
+        .demo-title-slide .accent-line { background-color: #1A9AFA; height: 6px; width: 100px; }
+        .demo-title-slide .logo-container { position: absolute; bottom: 40px; right: 40px; width: 180px; }
+        .demo-title-slide .title-container { padding-left: 100px; padding-right: 100px; }
+        .demo-title-slide .flex { display: flex; }
+        .demo-title-slide .flex-col { flex-direction: column; }
+        .demo-title-slide .flex-grow { flex: 1 1 auto; }
+        .demo-title-slide .justify-center { justify-content: center; }
+        .demo-title-slide .w-full { width: 100%; }
+        .demo-title-slide .h-2 { height: 8px; }
+        .demo-title-slide .h-12 { height: 48px; }
+        .demo-title-slide .absolute { position: absolute; }
+        .demo-title-slide .left-0 { left: 0; }
+        .demo-title-slide .top-0 { top: 0; }
+        .demo-title-slide .bottom-0 { bottom: 0; }
+        .demo-title-slide .w-12 { width: 48px; }
+        .demo-title-slide .relative { position: relative; }
+        .demo-title-slide .mb-2 { margin-bottom: 8px; }
+        .demo-title-slide .mb-4 { margin-bottom: 16px; }
+        .demo-title-slide .mb-6 { margin-bottom: 24px; }
+        .demo-title-slide .mb-10 { margin-bottom: 40px; }
+        .demo-title-slide .text-5xl { font-size: 40px; line-height: 1.2; }
+        .demo-title-slide .text-xl { font-size: 20px; }
+        .demo-title-slide .text-lg { font-size: 18px; }
+        .demo-title-slide .font-bold { font-weight: 700; }
+        .demo-title-slide .max-w-3xl { max-width: 48rem; }
+      </style>
+      <div class=\"slide-container flex flex-col\">
+        <div class=\"w-full h-2\"></div>
+        <div class=\"absolute left-0 top-0 bottom-0 w-12\"></div>
+        <div class=\"flex flex-col flex-grow justify-center title-container\">
+          <div class=\"mb-2\">
+            <div class=\"accent-line mb-6\"></div>
+            <h1 class=\"text-5xl font-bold mb-4\">Commercial Due Diligence:</h1>
+            <h1 class=\"text-5xl font-bold accent-blue mb-10\">Heineken N.V.</h1>
+            <p class=\"text-xl mb-10\">Presented by EY-Parthenon | September 2025</p>
+            <p class=\"text-lg max-w-3xl\">A comprehensive commercial due diligence report covering business review, market attractiveness, competitive landscape, and growth outlook.</p>
+          </div>
+        </div>
+        <div class=\"w-full h-12 relative\">
+          <div class=\"absolute left-0 bottom-0 h-2\" style=\"width:33.333%; background-color:#1A9AFA;\"></div>
+        </div>
+        <!-- Logo omitted here to avoid duplication; deck theme already renders bottom-right logo -->
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-toc-slide\">
+      <style>
+        .demo-toc-slide { font-family: Arial, sans-serif; color: #2E2E38; }
+        .demo-toc-slide .slide-container { width: 1280px; min-height: 720px; position: relative; overflow: hidden; background: #FFFFFF; }
+        .demo-toc-slide .accent-line { background-color: #1A9AFA; height: 4px; width: 80px; }
+        .demo-toc-slide .toc-container { padding-left: 80px; padding-right: 80px; margin-top: 64px; }
+        .demo-toc-slide .grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 32px; row-gap: 16px; }
+        .demo-toc-slide .toc-item { display: flex; align-items: center; margin-bottom: 12px; flex-wrap: nowrap; }
+        .demo-toc-slide .toc-number { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background-color: #1A9AFA; color: #fff; font-weight: 700; margin-right: 14px; flex: 0 0 auto; }
+        .demo-toc-slide .toc-text { font-size: 17px; white-space: nowrap; flex: 1 1 auto; overflow: visible; }
+        .demo-toc-slide .text-4xl { font-size: 32px; line-height: 1.25; }
+        .demo-toc-slide .font-bold { font-weight: 700; }
+        .demo-toc-slide .mb-2 { margin-bottom: 8px; }
+        .demo-toc-slide .mb-6 { margin-bottom: 24px; }
+        .demo-toc-slide .mb-8 { margin-bottom: 32px; }
+        .demo-toc-slide .w-full { width: 100%; }
+        .demo-toc-slide .h-2 { height: 8px; }
+        .demo-toc-slide .absolute { position: absolute; }
+        .demo-toc-slide .left-0 { left: 0; }
+        .demo-toc-slide .top-0 { top: 0; }
+        .demo-toc-slide .bottom-0 { bottom: 0; }
+        .demo-toc-slide .w-12 { width: 48px; }
+        .demo-toc-slide .relative { position: relative; }
+        .demo-toc-slide .h-12 { height: 48px; }
+      </style>
+      <div class=\"slide-container\">
+        <div class=\"w-full h-2\"></div>
+        <div class=\"absolute left-0 top-0 bottom-0 w-12\"></div>
+        <div class=\"toc-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Table of Contents</h1>
+            <div class=\"accent-line mb-8\"></div>
+          </div>
+          <div class=\"grid\">
+            <div class=\"toc-item\"><div class=\"toc-number\">1</div><span class=\"toc-text\">Executive Summary</span></div>
+            <div class=\"toc-item\"><div class=\"toc-number\">2</div><span class=\"toc-text\">Business Overview &amp; Model</span></div>
+            <div class=\"toc-item\"><div class=\"toc-number\">3</div><span class=\"toc-text\">Value Chain Position</span></div>
+            <div class=\"toc-item\"><div class=\"toc-number\">4</div><span class=\"toc-text\">Market Attractiveness</span></div>
+            <div class=\"toc-item\"><div class=\"toc-number\">5</div><span class=\"toc-text\">Beer Market Segmentation &amp; Outlook</span></div>
+            <div class=\"toc-item\"><div class=\"toc-number\">6</div><span class=\"toc-text\">Segments Served vs Competitors</span></div>
+            <div class=\"toc-item\"><div class=\"toc-number\">7</div><span class=\"toc-text\">Key Growth Drivers &amp; Risks</span></div>
+            <div class=\"toc-item\"><div class=\"toc-number\">8</div><span class=\"toc-text\">Opportunities &amp; Threats</span></div>
+            <div class=\"toc-item\"><div class=\"toc-number\">9</div><span class=\"toc-text\">Financial Performance Overview</span></div>
+            <div class=\"toc-item\"><div class=\"toc-number\">10</div><span class=\"toc-text\">Competitive Landscape</span></div>
+            <div class=\"toc-item\"><div class=\"toc-number\">11</div><span class=\"toc-text\">Competitor Benchmarking</span></div>
+            <div class=\"toc-item\"><div class=\"toc-number\">12</div><span class=\"toc-text\">Heineken Competitive Position</span></div>
+            <div class=\"toc-item\"><div class=\"toc-number\">13</div><span class=\"toc-text\">Opportunities &amp; Threats</span></div>
+          </div>
+        </div>
+        <div class=\"w-full h-12 relative\"><div class=\"absolute left-0 bottom-0 h-2\" style=\"width:33.333%; background-color:#1A9AFA;\"></div></div>
+        <!-- Logo omitted to avoid duplication; theme adds the EY mark -->
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-overview-slide\">
+      <style>
+        .demo-overview-slide { font-family: Arial, sans-serif; color: #2E2E38; }
+        .demo-overview-slide .slide-container { width: 1280px; min-height: 720px; position: relative; overflow: hidden; background: #FFFFFF; }
+        .demo-overview-slide .accent-line { background-color: #1A9AFA; height: 4px; width: 80px; }
+        .demo-overview-slide .content-container { padding-left: 100px; padding-right: 100px; margin-top: 64px; }
+        .demo-overview-slide .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+        .demo-overview-slide .text-4xl { font-size: 32px; line-height: 1.25; }
+        .demo-overview-slide .text-2xl { font-size: 24px; }
+        .demo-overview-slide .font-bold { font-weight: 700; }
+        .demo-overview-slide .font-semibold { font-weight: 600; }
+        .demo-overview-slide .accent-blue { color: #1A9AFA; }
+        .demo-overview-slide .mb-2 { margin-bottom: 8px; }
+        .demo-overview-slide .mb-4 { margin-bottom: 16px; }
+        .demo-overview-slide .mb-6 { margin-bottom: 24px; }
+        .demo-overview-slide .mb-8 { margin-bottom: 32px; }
+        .demo-overview-slide .bullet-point { display: flex; margin-bottom: 14px; }
+        .demo-overview-slide .bullet-icon { color: #1A9AFA; margin-right: 12px; flex-shrink: 0; margin-top: 4px; }
+        .demo-overview-slide .w-full { width: 100%; }
+        .demo-overview-slide .h-2 { height: 8px; }
+        .demo-overview-slide .absolute { position: absolute; }
+        .demo-overview-slide .left-0 { left: 0; }
+        .demo-overview-slide .bottom-0 { bottom: 0; }
+        .demo-overview-slide .relative { position: relative; }
+        .demo-overview-slide .h-12 { height: 48px; }
+      </style>
+      <div class=\"slide-container\">
+        <div class=\"w-full h-2\"></div>
+        <div class=\"content-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Business Overview &amp; Model</h1>
+            <div class=\"accent-line mb-8\"></div>
+          </div>
+          <div class=\"grid\">
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Company Profile</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Founded:</span> 1864 in Amsterdam, Netherlands</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Global Presence:</span> Operations in 190+ countries</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Employees:</span> 88,000+ worldwide</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Production:</span> 181 breweries and production facilities</div></div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\" style=\"margin-top:24px\">Core Business</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>Premium beer brewing and distribution</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>Cider production and marketing</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>Beyond-beer beverages (RTDs, hard seltzers)</div></div>
+            </div>
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">EverGreen Strategy</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Premiumization:</span> Focus on premium portfolio led by Heineken®</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Digitalization:</span> eB2B platform, data analytics, AI integration</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Sustainability:</span> Brew a Better World initiatives, carbon reduction</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Innovation:</span> Low &amp; no‑alcohol (LONO) leadership, beyond beer</div></div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\" style=\"margin-top:24px\">Key Brands</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Global:</span> Heineken®, Amstel, Desperados, Sol, Tiger</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Regional Leaders:</span> Birra Moretti, Żywiec, Kingfisher, Larue</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Portfolio:</span> 500+ brands across premium, mainstream, craft, and LONO segments</div></div>
+            </div>
+          </div>
+        </div>
+        <div class=\"w-full h-12 relative\"><div class=\"absolute left-0 bottom-0 h-2\" style=\"width:33.333%; background-color:#1A9AFA;\"></div></div>
+        <!-- Logo omitted to avoid duplication; theme adds the EY mark -->
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-value-slide\">
+      <style>
+        .demo-value-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-value-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-value-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-value-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-value-slide .grid{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+        .demo-value-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-value-slide .text-2xl{font-size:24px}
+        .demo-value-slide .font-bold{font-weight:700}
+        .demo-value-slide .font-semibold{font-weight:600}
+        .demo-value-slide .accent-blue{color:#1A9AFA}
+        .demo-value-slide .bullet-point{display:flex;margin-bottom:14px}
+        .demo-value-slide .bullet-icon{color:#1A9AFA;margin-right:12px;flex-shrink:0;margin-top:4px}
+        .demo-value-slide .value-chain-diagram{display:flex;justify-content:space-between;margin:20px 0;padding:10px 0;position:relative}
+        .demo-value-slide .connector{position:absolute;top:30px;left:10%;width:80%;height:2px;background:#C4C4CD;z-index:1}
+        .demo-value-slide .value-chain-step{text-align:center;position:relative;width:18%;z-index:2}
+        .demo-value-slide .step-icon{background:#1A9AFA;color:#fff;width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-weight:700}
+      </style>
+      <div class=\"slide-container\">
+        <div class=\"content-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Value Chain Position</h1>
+            <div class=\"accent-line mb-8\"></div>
+          </div>
+          <div class=\"value-chain-diagram mb-6\">
+            <div class=\"connector\"></div>
+            <div class=\"value-chain-step\"><div class=\"step-icon\">A</div><div class=\"font-semibold\">Agriculture</div></div>
+            <div class=\"value-chain-step\"><div class=\"step-icon\">B</div><div class=\"font-semibold\">Brewing</div></div>
+            <div class=\"value-chain-step\"><div class=\"step-icon\">P</div><div class=\"font-semibold\">Packaging</div></div>
+            <div class=\"value-chain-step\"><div class=\"step-icon\">D</div><div class=\"font-semibold\">Distribution</div></div>
+            <div class=\"value-chain-step\"><div class=\"step-icon\">C</div><div class=\"font-semibold\">Consumer</div></div>
+          </div>
+          <div class=\"grid\">
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Upstream Activities</h2>
+              <h3 class=\"font-semibold mb-2\">Agriculture Sourcing</h3>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>Global sourcing for barley, hops and other raw materials</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>Top-3 user of malted barley; key supply from EU, UK, Egypt, Australia</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>Africa: 150k+ smallholder farmers for cassava, sorghum, rice</div></div>
+              <h3 class=\"font-semibold mb-2\" style=\"margin-top:20px\">Brewing Operations</h3>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>181 breweries and production facilities worldwide</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>90 breweries connected to the Connected Brewery program</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>Digital transformation improving efficiency and productivity</div></div>
+            </div>
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Downstream Activities</h2>
+              <h3 class=\"font-semibold mb-2\">Packaging &amp; Logistics</h3>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>98% of packaging recyclable by design (2024)</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>~4,700 logistics service providers</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>Cloud platforms for transport and warehouse management</div></div>
+              <h3 class=\"font-semibold mb-2\" style=\"margin-top:20px\">Customer &amp; Consumer</h3>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>Diversified channels: on‑trade, off‑trade, e‑commerce</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>eazle eB2B platform with 670k+ active customers</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div>Direct retail ownership in select markets</div></div>
+            </div>
+          </div>
+        </div>
+        <div class=\"w-full\" style=\"height:48px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-market-slide\">
+      <style>
+        .demo-market-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-market-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-market-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-market-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-market-slide .grid{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+        .demo-market-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-market-slide .text-2xl{font-size:24px}
+        .demo-market-slide .font-bold{font-weight:700}
+        .demo-market-slide .font-semibold{font-weight:600}
+        .demo-market-slide .accent-blue{color:#1A9AFA}
+        .demo-market-slide .bullet-point{display:flex;margin-bottom:14px}
+        .demo-market-slide .bullet-icon{color:#1A9AFA;margin-right:12px;flex-shrink:0;margin-top:4px}
+        .demo-market-slide .highlight-box{background:#F5F7FA;border-left:4px solid #1A9AFA;padding:15px;margin:15px 0}
+      </style>
+      <div class=\"slide-container\">
+        <div class=\"content-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Market Attractiveness</h1>
+            <div class=\"accent-line mb-8\"></div>
+          </div>
+          <div class=\"grid\">
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Global Market Overview</h2>
+              <div class=\"highlight-box\">
+                <p class=\"font-semibold\">Global Beer Market Size (2024)</p>
+                <p style=\"font-size:22px\">$839 – $851 Billion</p>
+                <p style=\"color:#6b7280\">Expected growth to $1.17T by 2032</p>
+              </div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Growth Rate:</span> 2–4% CAGR to 2030</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Volume:</span> 1.6% organic growth in 2024</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Characteristics:</span> Mature in EU/NA; high growth APAC &amp; Africa</div></div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\" style=\"margin-top:24px\">Regional Market Attractiveness</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">APAC:</span> Highest potential (8.0% CAGR); strong in Vietnam, India, China</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Africa &amp; ME:</span> Emerging markets; expansion in Nigeria &amp; South Africa</div></div>
+            </div>
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Market Trends &amp; Dynamics</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Premiumization:</span> Premium beer 4.5% CAGR vs mainstream 1.2%</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">LONO Growth:</span> Non‑alcoholic beer +9% p.a.</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Craft Evolution:</span> Craft +9.5% CAGR despite consolidation</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Health Focus:</span> Demand for low‑calorie, functional, wellness options</div></div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\" style=\"margin-top:24px\">Consumer Behavior Shifts</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Generational Gap:</span> Gen Z consumes 20% less alcohol; quality over quantity</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Experiential Value:</span> Preference for premium products with distinct stories</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Digital Engagement:</span> Growing D2C and e‑commerce</div></div>
+            </div>
+          </div>
+        </div>
+        <div class=\"w-full\" style=\"height:48px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-segment-slide\">
+      <style>
+        .demo-segment-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-segment-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-segment-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-segment-slide .content-container{padding-left:100px;padding-right:100px;margin-top:48px;margin-bottom:24px}
+        .demo-segment-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:12px}
+        .demo-segment-slide .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:8px}
+        .demo-segment-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-segment-slide .text-2xl{font-size:24px}
+        .demo-segment-slide .font-bold{font-weight:700}
+        .demo-segment-slide .font-semibold{font-weight:600}
+        .demo-segment-slide .accent-blue{color:#1A9AFA}
+        .demo-segment-slide .segment-card{border-left:4px solid #1A9AFA;padding:12px;background:#f5f5f7}
+        .demo-segment-slide .placeholder{height:250px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
+      </style>
+      <div class=\"slide-container\">
+        <div class=\"content-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Beer Market Segmentation &amp; Outlook</h1>
+            <div class=\"accent-line mb-6\"></div>
+          </div>
+          <div class=\"grid2\">
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Market by Segment (2024)</h2>
+              <div class=\"placeholder\">Pie chart (Premium/Mainstream/Economy/Craft)</div>
+              <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:4px\">Source: Industry analysis</div>
+            </div>
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Projected Growth by Segment (CAGR 2024–2028)</h2>
+              <div class=\"placeholder\">Bar chart (CAGR by segment)</div>
+              <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:4px\">Source: IWSR, EY‑Parthenon analysis</div>
+            </div>
+          </div>
+          <div class=\"grid3\">
+            <div class=\"segment-card\"><h3 class=\"font-bold\">By Price Point</h3><div><b>Premium:</b> 26%</div><div><b>Mainstream:</b> 62%</div><div><b>Economy:</b> 12%</div></div>
+            <div class=\"segment-card\"><h3 class=\"font-bold\">By Product Type</h3><div><b>Lager:</b> 76%</div><div><b>Ale:</b> 12%</div><div><b>Specialty/Craft:</b> 9%</div><div><b>LONO:</b> 3%</div></div>
+            <div class=\"segment-card\"><h3 class=\"font-bold\">By Geography</h3><div><b>APAC:</b> 34%</div><div><b>Europe:</b> 28%</div><div><b>Americas:</b> 26%</div><div><b>Africa &amp; ME:</b> 12%</div></div>
+          </div>
+        </div>
+        <div class=\"w-full\" style=\"height:48px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-competitors-slide\">
+      <style>
+        .demo-competitors-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-competitors-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-competitors-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-competitors-slide .content-container{padding-left:100px;padding-right:100px;margin-top:48px;margin-bottom:24px}
+        .demo-competitors-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-competitors-slide .text-2xl{font-size:24px}
+        .demo-competitors-slide .font-bold{font-weight:700}
+        .demo-competitors-slide .font-semibold{font-weight:600}
+        .demo-competitors-slide .accent-blue{color:#1A9AFA}
+        .demo-competitors-slide .data-table{width:100%;border-collapse:collapse}
+        .demo-competitors-slide .data-table th{background:#f5f5f7;padding:8px;text-align:left;font-weight:700;border-bottom:2px solid #1A9AFA}
+        .demo-competitors-slide .data-table td{padding:8px;border-bottom:1px solid #e5e5e5}
+        .demo-competitors-slide .coverage-strong{color:#1A9AFA;font-weight:700}
+        .demo-competitors-slide .coverage-moderate{color:#3DB5FF}
+        .demo-competitors-slide .coverage-limited{color:#B4E2FF}
+        .demo-competitors-slide .placeholder{height:250px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
+      </style>
+      <div class=\"slide-container\">
+        <div class=\"content-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Segments Served vs. Competitors</h1>
+            <div class=\"accent-line mb-6\"></div>
+          </div>
+          <div class=\"mb-6\">
+            <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Competitive Positioning by Market Segment</h2>
+            <table class=\"data-table\">
+              <thead>
+                <tr><th style=\"width:20%\">Segment</th><th>Heineken</th><th>AB InBev</th><th>Carlsberg</th><th>Molson Coors</th></tr>
+              </thead>
+              <tbody>
+                <tr><td class=\"font-semibold\">Premium</td><td class=\"coverage-strong\">●●● Strong</td><td class=\"coverage-strong\">●●● Strong</td><td class=\"coverage-moderate\">●● Moderate</td><td class=\"coverage-moderate\">●● Moderate</td></tr>
+                <tr><td class=\"font-semibold\">Mainstream</td><td class=\"coverage-moderate\">●● Moderate</td><td class=\"coverage-strong\">●●● Strong</td><td class=\"coverage-strong\">●●● Strong</td><td class=\"coverage-strong\">●●● Strong</td></tr>
+                <tr><td class=\"font-semibold\">Economy</td><td class=\"coverage-limited\">● Limited</td><td class=\"coverage-strong\">●●● Strong</td><td class=\"coverage-moderate\">●● Moderate</td><td class=\"coverage-moderate\">●● Moderate</td></tr>
+                <tr><td class=\"font-semibold\">Craft/Specialty</td><td class=\"coverage-moderate\">●● Moderate</td><td class=\"coverage-strong\">●●● Strong</td><td class=\"coverage-limited\">● Limited</td><td class=\"coverage-moderate\">●● Moderate</td></tr>
+                <tr><td class=\"font-semibold\">LONO</td><td class=\"coverage-strong\">●●● Strong</td><td class=\"coverage-moderate\">●● Moderate</td><td class=\"coverage-moderate\">●● Moderate</td><td class=\"coverage-limited\">● Limited</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div>
+            <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Regional Market Strength</h2>
+            <div class=\"placeholder\">Radar chart: Europe / Americas / APAC / Africa & ME</div>
+            <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:8px\">Source: Market share data, annual reports, EY‑Parthenon analysis</div>
+          </div>
+          <div style=\"margin-top:12px;font-size:14px\"><b>Key Insight:</b> Heineken leads in premium and LONO across Europe and Africa; AB InBev dominates in the Americas; Carlsberg is strong in Asia.</div>
+        </div>
+        <div class=\"w-full\" style=\"height:48px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-growth-slide\">
+      <style>
+        .demo-growth-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-growth-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-growth-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-growth-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-growth-slide .grid{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+        .demo-growth-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-growth-slide .text-2xl{font-size:24px}
+        .demo-growth-slide .font-bold{font-weight:700}
+        .demo-growth-slide .font-semibold{font-weight:600}
+        .demo-growth-slide .accent-blue{color:#1A9AFA}
+        .demo-growth-slide .bullet-point{display:flex;margin-bottom:14px}
+        .demo-growth-slide .bullet-icon{color:#1A9AFA;margin-right:12px;flex-shrink:0;margin-top:4px}
+        .demo-growth-slide .bullet-icon.gray{color:#747480}
+      </style>
+      <div class=\"slide-container\">
+        <div class=\"content-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Key Growth Drivers &amp; Risks</h1>
+            <div class=\"accent-line mb-8\"></div>
+          </div>
+          <div class=\"grid\">
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Growth Drivers</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Premiumization</span><div style=\"font-size:15px;color:#747480;margin-left:4px;margin-top:4px\">Consumers trading up to premium and super‑premium beer globally, driving higher margin sales</div></div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Emerging Markets Expansion</span><div style=\"font-size:15px;color:#747480;margin-left:4px;margin-top:4px\">Strong growth potential in Asia‑Pacific (Vietnam, India) and Africa (Nigeria, South Africa)</div></div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">LONO Category Leadership</span><div style=\"font-size:15px;color:#747480;margin-left:4px;margin-top:4px\">Low &amp; No‑Alcohol segment growing ~8% CAGR with Heineken® 0.0 as category leader</div></div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Strong Brand Portfolio</span><div style=\"font-size:15px;color:#747480;margin-left:4px;margin-top:4px\">500+ brands across segments with global distribution and marketing excellence</div></div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Beyond Beer Innovation</span><div style=\"font-size:15px;color:#747480;margin-left:4px;margin-top:4px\">Expansion into RTDs and hard seltzers aligned to evolving Gen Z preferences</div></div></div>
+            </div>
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Risks &amp; Challenges</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon gray\">•</div><div><span class=\"font-semibold\">Regulatory Pressure</span><div style=\"font-size:15px;color:#747480;margin-left:4px;margin-top:4px\">Increasing taxes, marketing restrictions, and health warnings globally</div></div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon gray\">•</div><div><span class=\"font-semibold\">Shifting Consumer Preferences</span><div style=\"font-size:15px;color:#747480;margin-left:4px;margin-top:4px\">Gen Z drinking ~20% less alcohol; greater health consciousness</div></div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon gray\">•</div><div><span class=\"font-semibold\">Supply Chain Volatility</span><div style=\"font-size:15px;color:#747480;margin-left:4px;margin-top:4px\">Raw material inflation (barley, aluminum), energy costs, logistics</div></div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon gray\">•</div><div><span class=\"font-semibold\">Craft &amp; Local Competition</span><div style=\"font-size:15px;color:#747480;margin-left:4px;margin-top:4px\">Fragmented competitors capturing premium niches</div></div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon gray\">•</div><div><span class=\"font-semibold\">Climate Change Impact</span><div style=\"font-size:15px;color:#747480;margin-left:4px;margin-top:4px\">Water scarcity and agricultural yield challenges for barley &amp; hops</div></div></div>
+            </div>
+          </div>
+        </div>
+        <div class=\"w-full\" style=\"height:48px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-financial-slide\">
+      <style>
+        .demo-financial-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-financial-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-financial-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-financial-slide .content-container{padding-left:100px;padding-right:100px;margin-top:48px;margin-bottom:24px}
+        .demo-financial-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-financial-slide .text-xl{font-size:20px}
+        .demo-financial-slide .font-bold{font-weight:700}
+        .demo-financial-slide .font-semibold{font-weight:600}
+        .demo-financial-slide .accent-blue{color:#1A9AFA}
+        .demo-financial-slide .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px}
+        .demo-financial-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:12px}
+        .demo-financial-slide .card{border-left:4px solid #1A9AFA;padding:12px;background:#f5f5f7}
+        .demo-financial-slide .pos{color:#10B981}
+        .demo-financial-slide .neg{color:#EF4444}
+        .demo-financial-slide .placeholder{height:220px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
+        .demo-financial-slide .data-table{width:100%;border-collapse:collapse}
+        .demo-financial-slide .data-table th{background:#f5f5f7;padding:8px;text-align:left;font-weight:700;border-bottom:2px solid #1A9AFA}
+        .demo-financial-slide .data-table td{padding:8px;border-bottom:1px solid #e5e5e5}
+      </style>
+      <div class=\"slide-container\">
+        <div class=\"content-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Financial Performance Overview</h1>
+            <div class=\"accent-line mb-6\"></div>
+          </div>
+          <div class=\"grid3\">
+            <div class=\"card\"><h3 class=\"font-bold\">Net Revenue (beia)</h3><div class=\"font-semibold\" style=\"font-size:22px\">€29.96B</div><div class=\"neg\" style=\"font-size:14px\">-1.1% YoY</div><div style=\"font-size:14px;margin-top:4px\">Organic growth: +5.0%</div></div>
+            <div class=\"card\"><h3 class=\"font-bold\">Operating Profit (beia)</h3><div class=\"font-semibold\" style=\"font-size:22px\">€4.51B</div><div class=\"pos\" style=\"font-size:14px\">+1.6% YoY</div><div style=\"font-size:14px;margin-top:4px\">Margin: 15.1% (+40bps)</div></div>
+            <div class=\"card\"><h3 class=\"font-bold\">Net Profit (beia)</h3><div class=\"font-semibold\" style=\"font-size:22px\">€2.74B</div><div class=\"pos\" style=\"font-size:14px\">+4.1% YoY</div><div style=\"font-size:14px;margin-top:4px\">FCF: €3.06B (+73.8%)</div></div>
+          </div>
+          <div class=\"grid2\">
+            <div>
+              <h2 class=\"text-xl font-semibold accent-blue mb-3\">Financial Performance (€B)</h2>
+              <div class=\"placeholder\">Bar chart (2023 vs 2024: Revenue, Op Profit, Net Profit, FCF)</div>
+              <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:4px\">Source: Heineken Annual Report 2024</div>
+            </div>
+            <div>
+              <h2 class=\"text-xl font-semibold accent-blue mb-3\">Revenue by Region (2024)</h2>
+              <div class=\"placeholder\">Doughnut chart (EU/AM/APAC/AME)</div>
+              <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:4px\">Source: Heineken Annual Report 2024</div>
+            </div>
+          </div>
+          <div>
+            <h2 class=\"text-xl font-semibold accent-blue mb-3\">Regional Performance Highlights</h2>
+            <table class=\"data-table\">
+              <thead>
+                <tr><th style=\"width:25%\">Region</th><th style=\"width:25%\">Revenue Growth</th><th style=\"width:25%\">Op. Profit Margin</th><th style=\"width:25%\">Key Markets</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Europe</td><td class=\"neg\">-2.3%</td><td>12.4%</td><td>UK, Netherlands, Spain</td></tr>
+                <tr><td>Americas</td><td class=\"pos\">+3.6%</td><td>16.2%</td><td>Brazil, Mexico, USA</td></tr>
+                <tr><td>Asia Pacific</td><td class=\"pos\">+6.8%</td><td>17.3%</td><td>Vietnam, China, India</td></tr>
+                <tr><td>Africa &amp; Middle East</td><td class=\"pos\">+8.2%</td><td>14.5%</td><td>Nigeria, South Africa, Ethiopia</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class=\"w-full\" style=\"height:48px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-competitive-slide\">
+      <style>
+        .demo-competitive-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-competitive-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-competitive-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-competitive-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-competitive-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-competitive-slide .text-2xl{font-size:24px}
+        .demo-competitive-slide .text-xl{font-size:20px}
+        .demo-competitive-slide .font-bold{font-weight:700}
+        .demo-competitive-slide .font-semibold{font-weight:600}
+        .demo-competitive-slide .accent-blue{color:#1A9AFA}
+        .demo-competitive-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+        .demo-competitive-slide .comp-card{border-left:3px solid #1A9AFA;padding-left:15px;margin-bottom:16px}
+        .demo-competitive-slide .bar-row{display:flex;align-items:center;margin-bottom:8px}
+        .demo-competitive-slide .bar-label{width:25%;font-weight:600}
+        .demo-competitive-slide .bar-wrap{width:75%}
+        .demo-competitive-slide .bar{height:24px;background:#1A9AFA;border-radius:4px;display:flex;align-items:center;justify-content:flex-end;padding-right:10px;color:#fff;font-weight:700}
+      </style>
+      <div class=\"slide-container\">
+        <div class=\"content-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Competitive Landscape</h1>
+            <div class=\"accent-line mb-8\"></div>
+          </div>
+          <div class=\"mb-8\">
+            <h2 class=\"text-2xl font-semibold accent-blue mb-6\">Global Market Share Distribution 2024</h2>
+            <div>
+              <div class=\"bar-row\"><div class=\"bar-label\">AB InBev</div><div class=\"bar-wrap\"><div class=\"bar\" style=\"width:26.4%\">26.4%</div></div></div>
+              <div class=\"bar-row\"><div class=\"bar-label\">Heineken</div><div class=\"bar-wrap\"><div class=\"bar\" style=\"width:12.1%\">12.1%</div></div></div>
+              <div class=\"bar-row\"><div class=\"bar-label\">Carlsberg</div><div class=\"bar-wrap\"><div class=\"bar\" style=\"width:6.9%\">6.9%</div></div></div>
+              <div class=\"bar-row\"><div class=\"bar-label\">Molson Coors</div><div class=\"bar-wrap\"><div class=\"bar\" style=\"width:4.3%\">4.3%</div></div></div>
+              <div class=\"bar-row\"><div class=\"bar-label\">Other</div><div class=\"bar-wrap\"><div class=\"bar\" style=\"width:50.3%\">50.3%</div></div></div>
+            </div>
+          </div>
+          <div class=\"grid2\">
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Key Global Competitors</h2>
+              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">AB InBev</h3><p style=\"margin-bottom:8px\"><b>Key Brands:</b> Budweiser, Stella Artois, Corona, Beck's</p><p><b>Regional Strength:</b> Americas, Europe, Asia‑Pacific</p></div>
+              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Carlsberg Group</h3><p style=\"margin-bottom:8px\"><b>Key Brands:</b> Carlsberg, Tuborg, Kronenbourg 1664</p><p><b>Regional Strength:</b> Northern/Eastern Europe, Asia</p></div>
+              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Molson Coors</h3><p style=\"margin-bottom:8px\"><b>Key Brands:</b> Coors Light, Miller Lite, Blue Moon</p><p><b>Regional Strength:</b> North America, UK</p></div>
+            </div>
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Regional Competitors</h2>
+              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Asahi Group Holdings</h3><p style=\"margin-bottom:8px\"><b>Key Brands:</b> Asahi Super Dry, Peroni, Grolsch</p><p><b>Regional Strength:</b> Japan, Oceania, Europe</p></div>
+              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Tsingtao Brewery</h3><p style=\"margin-bottom:8px\"><b>Key Brands:</b> Tsingtao</p><p><b>Regional Strength:</b> China, East Asia</p></div>
+              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Constellation Brands</h3><p style=\"margin-bottom:8px\"><b>Key Brands:</b> Modelo, Corona (US rights), Pacifico</p><p><b>Regional Strength:</b> North America</p></div>
+            </div>
+          </div>
+        </div>
+        <div class=\"w-full\" style=\"height:48px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-exec-slide\">
+      <style>
+        .demo-exec-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-exec-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-exec-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-exec-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-exec-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-exec-slide .text-2xl{font-size:24px}
+        .demo-exec-slide .font-bold{font-weight:700}
+        .demo-exec-slide .font-semibold{font-weight:600}
+        .demo-exec-slide .accent-blue{color:#1A9AFA}
+        .demo-exec-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+        .demo-exec-slide .bullet-point{display:flex;margin-bottom:14px}
+        .demo-exec-slide .bullet-icon{color:#1A9AFA;margin-right:12px;flex-shrink:0;margin-top:4px}
+        .demo-exec-slide .highlight-box{background:#F5F5F7;border-left:4px solid #1A9AFA;padding:15px;margin:10px 0}
+      </style>
+      <div class=\"slide-container\">
+        <div class=\"content-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Executive Summary</h1>
+            <div class=\"accent-line mb-8\"></div>
+          </div>
+          <div class=\"grid2\">
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Investment Highlights</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Strong Premium Position:</b> #2 global brewer (~12% share) led by Heineken®</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Market Leadership:</b> Leaders in Vietnam, Brazil, Mexico; expanding in India</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Innovation Pipeline:</b> LONO leadership (Heineken® 0.0) and beyond‑beer expansion</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Financial Strength:</b> 15.1% Op margin, €3.06B FCF (+73.8%), productivity gains</div></div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\" style=\"margin-top:24px\">Market Assessment</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Global Market:</b> ~€839B (2024), 2–4% CAGR to 2030, premium‑led growth</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Regional:</b> APAC (6–8%) &amp; Africa (5–7%) offset mature Europe (1–2%)</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Category:</b> Premium 4.5% CAGR, Craft 9%, LONO 8% vs mainstream 1.2%</div></div>
+            </div>
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Key Risks &amp; Opportunities</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Risk – Consumption:</b> Gen Z ~20% lower alcohol intake; preference shifts</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Risk – Input Costs:</b> Raw materials &amp; energy volatility</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Risk – Regulation:</b> Stricter marketing, labeling, sustainability compliance</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Opportunity – LONO:</b> Scale leadership position as growth accelerates</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Opportunity – Digital:</b> eB2B scaling (€13B GMV, 670k+ customers)</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Opportunity – APAC:</b> Premiumization in Vietnam, China, India</div></div>
+              <div class=\"highlight-box\" style=\"margin-top:24px\">
+                <h3 class=\"font-bold\" style=\"margin-bottom:6px\">Commercial Assessment</h3>
+                <p style=\"margin-bottom:8px\">Well‑positioned for sustained growth via premium portfolio, innovation, and EM footprint; EverGreen strategy aligns to market trends while lifting efficiency.</p>
+                <p class=\"font-semibold\">5‑Year Base Case: ~4% CAGR; margin expansion potential via digitalization and productivity.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class=\"w-full\" style=\"height:48px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-benchmark-slide\">
+      <style>
+        .demo-benchmark-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-benchmark-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-benchmark-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-benchmark-slide .content-container{padding-left:100px;padding-right:100px;margin-top:48px;margin-bottom:24px}
+        .demo-benchmark-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-benchmark-slide .text-2xl{font-size:24px}
+        .demo-benchmark-slide .font-bold{font-weight:700}
+        .demo-benchmark-slide .font-semibold{font-weight:600}
+        .demo-benchmark-slide .accent-blue{color:#1A9AFA}
+        .demo-benchmark-slide .table{width:100%;border-collapse:collapse}
+        .demo-benchmark-slide .table th{background:#f5f5f7;padding:12px;text-align:left;font-weight:700;border-bottom:2px solid #1A9AFA}
+        .demo-benchmark-slide .table td{padding:12px;border-bottom:1px solid #e5e5e5}
+        .demo-benchmark-slide .hl{color:#1A9AFA;font-weight:700}
+        .demo-benchmark-slide .hk{background:#f0f8ff}
+        .demo-benchmark-slide .placeholder{height:250px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
+        .demo-benchmark-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+        .demo-benchmark-slide .card{border-left:4px solid #1A9AFA;padding:12px;background:#f5f5f7}
+      </style>
+      <div class=\"slide-container\">
+        <div class=\"content-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Competitor Benchmarking</h1>
+            <div class=\"accent-line mb-6\"></div>
+          </div>
+          <div class=\"mb-6\">
+            <table class=\"table\">
+              <thead>
+                <tr>
+                  <th style=\"width:20%\">Company</th>
+                  <th style=\"width:15%\">2024 Revenue (€B)</th>
+                  <th style=\"width:15%\">Operating Margin</th>
+                  <th style=\"width:15%\">Global Mkt Share</th>
+                  <th style=\"width:20%\">Key Markets</th>
+                  <th style=\"width:15%\">LONO Portfolio</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class=\"hk\"><td class=\"font-bold\">Heineken</td><td>36.0</td><td class=\"hl\">15.1%</td><td>12.0%</td><td>Europe, APAC, Americas</td><td class=\"hl\">Strong</td></tr>
+                <tr><td class=\"font-bold\">AB InBev</td><td class=\"hl\">58.3</td><td>14.8%</td><td class=\"hl\">26.4%</td><td>Americas, APAC, Europe</td><td>Medium</td></tr>
+                <tr><td class=\"font-bold\">Carlsberg</td><td>12.1</td><td>14.2%</td><td>7.0%</td><td>Europe, Asia</td><td>Medium</td></tr>
+                <tr><td class=\"font-bold\">Molson Coors</td><td>10.9</td><td>10.3%</td><td>4.5%</td><td>North America, Europe</td><td>Limited</td></tr>
+                <tr><td class=\"font-bold\">Asahi Group</td><td>16.2</td><td>11.7%</td><td>3.1%</td><td>Japan, Europe, Australia</td><td>Limited</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class=\"grid2\">
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Competitive Position Comparison</h2>
+              <div class=\"placeholder\">Radar chart: Heineken vs AB InBev vs Carlsberg</div>
+              <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:8px\">Source: Company reports, industry analysis, EY‑Parthenon analysis (2024–2025)</div>
+            </div>
+            <div class=\"card\">
+              <h3 class=\"font-bold\" style=\"margin-bottom:6px\">Key Insights</h3>
+              <div style=\"font-size:14px\">Heineken maintains strong operating margins and premium positioning; AB InBev leads in revenue and share; Heineken shows momentum in EM and LONO.</div>
+            </div>
+          </div>
+        </div>
+        <div style=\"height:48px;position:relative\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA\"></div></div>
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-competitive-position-slide\">
+      <style>
+        .demo-competitive-position-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-competitive-position-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-competitive-position-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-competitive-position-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-competitive-position-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-competitive-position-slide .text-2xl{font-size:24px}
+        .demo-competitive-position-slide .font-bold{font-weight:700}
+        .demo-competitive-position-slide .font-semibold{font-weight:600}
+        .demo-competitive-position-slide .accent-blue{color:#1A9AFA}
+        .demo-competitive-position-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+        .demo-competitive-position-slide .bullet-point{display:flex;margin-bottom:14px}
+        .demo-competitive-position-slide .bullet-icon{color:#1A9AFA;margin-right:12px;flex-shrink:0;margin-top:4px}
+        .demo-competitive-position-slide .metric-box{background:#F5F7FA;border-left:4px solid #1A9AFA;padding:16px;margin:10px 0}
+        .demo-competitive-position-slide .left-blue{border-left:4px solid #1A9AFA;padding-left:12px}
+      </style>
+      <div class=\"slide-container\">
+        <div class=\"content-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Heineken Competitive Position</h1>
+            <div class=\"accent-line mb-8\"></div>
+          </div>
+          <div class=\"grid2\">
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Strengths</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Global Brand Power:</b> Heineken® in 190+ countries</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Premium Leadership:</b> Heineken®, Birra Moretti, Tiger growing</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>LONO Innovation:</b> Heineken® 0.0 in 117 markets</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Marketing Excellence:</b> F1 and UEFA partnerships</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Digital:</b> eazle eB2B with 670k+ customers, ~€13B GMV</div></div>
+              <div class=\"metric-box\">
+                <div class=\"font-semibold accent-blue\" style=\"margin-bottom:6px\">Market Position</div>
+                <div>World's 2nd largest brewer</div>
+                <div style=\"font-size:14px;color:#6b7280\">~12% global market share; 240.7M hl (2024)</div>
+              </div>
+            </div>
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Challenges</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Scale Gap:</b> ~45% of AB InBev scale</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>European Exposure:</b> Mature/slow‑growth footprint</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Input Cost Volatility:</b> Commodities and energy</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Gen Z Patterns:</b> Lower alcohol consumption</div></div>
+              <h2 class=\"text-2xl font-semibold accent-blue\" style=\"margin:20px 0 12px\">Competitive Advantages</h2>
+              <div class=\"left-blue\" style=\"margin-bottom:10px\"><div class=\"font-semibold\" style=\"margin-bottom:4px\">Premium Portfolio Strength</div><div style=\"font-size:14px\">Premium brands outgrew market in 2024</div></div>
+              <div class=\"left-blue\" style=\"margin-bottom:10px\"><div class=\"font-semibold\" style=\"margin-bottom:4px\">Sustainability Leadership</div><div style=\"font-size:14px\">34% Scope 1/2 reduction; 84% renewable electricity</div></div>
+              <div class=\"left-blue\"><div class=\"font-semibold\" style=\"margin-bottom:4px\">Beyond Beer Innovation</div><div style=\"font-size:14px\">Adjacencies aligned to evolving preferences</div></div>
+            </div>
+          </div>
+        </div>
+        <div style=\"height:48px;position:relative\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA\"></div></div>
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-opportunities-threats-slide\">
+      <style>
+        .demo-opportunities-threats-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-opportunities-threats-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-opportunities-threats-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-opportunities-threats-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-opportunities-threats-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-opportunities-threats-slide .text-2xl{font-size:24px}
+        .demo-opportunities-threats-slide .font-bold{font-weight:700}
+        .demo-opportunities-threats-slide .font-semibold{font-weight:600}
+        .demo-opportunities-threats-slide .accent-blue{color:#1A9AFA}
+        .demo-opportunities-threats-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+        .demo-opportunities-threats-slide .bullet-point{display:flex;margin-bottom:14px}
+        .demo-opportunities-threats-slide .bullet-icon{color:#1A9AFA;margin-right:12px;flex-shrink:0;margin-top:4px}
+        .demo-opportunities-threats-slide .opp{border-left:4px solid #1A9AFA;padding:15px;background:#F5F9FE;margin-bottom:10px}
+        .demo-opportunities-threats-slide .threat{border-left:4px solid #FF6B6B;padding:15px;background:#FEF5F5;margin-bottom:10px}
+      </style>
+      <div class=\"slide-container\">
+        <div class=\"content-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Opportunities &amp; Threats</h1>
+            <div class=\"accent-line mb-8\"></div>
+          </div>
+          <div class=\"grid2\">
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-6\">Strategic Opportunities</h2>
+              <div class=\"opp\"><div class=\"font-semibold\" style=\"margin-bottom:6px\">Premium Growth in Emerging Markets</div><div>Expand premium brands in Vietnam, India, and Africa</div></div>
+              <div class=\"opp\"><div class=\"font-semibold\" style=\"margin-bottom:6px\">LONO Segment Acceleration</div><div>Leverage Heineken® 0.0 leadership (~8% CAGR)</div></div>
+              <div class=\"opp\"><div class=\"font-semibold\" style=\"margin-bottom:6px\">Digital &amp; D2C</div><div>Scale eazle eB2B to deepen relationships and data</div></div>
+              <div class=\"opp\"><div class=\"font-semibold\" style=\"margin-bottom:6px\">Beyond Beer Innovation</div><div>Grow Tiger Soju, STËLZ, and RTDs for Gen Z</div></div>
+            </div>
+            <div>
+              <h2 class=\"text-2xl font-semibold\" style=\"color:#ef4444;margin-bottom:24px\">Market Threats</h2>
+              <div class=\"threat\"><div class=\"font-semibold\" style=\"margin-bottom:6px\">Regulatory Pressure</div><div>Tighter rules and taxes in key markets</div></div>
+              <div class=\"threat\"><div class=\"font-semibold\" style=\"margin-bottom:6px\">Changing Consumption</div><div>Gen Z ~20% lower alcohol consumption</div></div>
+              <div class=\"threat\"><div class=\"font-semibold\" style=\"margin-bottom:6px\">Competitive Intensity</div><div>Craft fragmentation and global rival expansion</div></div>
+              <div class=\"threat\"><div class=\"font-semibold\" style=\"margin-bottom:6px\">Macroeconomic Headwinds</div><div>Inflation; input costs (barley, aluminum)</div></div>
+            </div>
+          </div>
+          <div style=\"margin-top:24px;border-top:1px solid #e5e7eb;padding-top:16px\">
+            <h3 class=\"text-xl font-semibold\" style=\"margin-bottom:8px\">Strategic Outlook</h3>
+            <div>Premium leadership and LONO innovation provide resilience; success hinges on balancing core investments and new offerings aligned to emerging trends.</div>
+          </div>
+        </div>
+        <div style=\"height:48px;position:relative\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA\"></div></div>
+      </div>
+    </div>
+    """
+]
+
+def _append_api_message(session_id: str, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+    conv = get_or_create_conversation(session_id)
+    conv["api_conversation"].append(ChatMessage(role=role, content=content, metadata=metadata))
+
+def _build_toc_html_from_deck(deck: html_slides.HtmlDeck) -> str:
+    # Extract titles from slides after index 1 (exclude Title and TOC)
+    titles: List[str] = []
+    for idx, s in enumerate(deck._slides):  # type: ignore[attr-defined]
+        if idx <= 1:
+            continue
+        title_text = getattr(s, "title", "") or ""
+        if not title_text:
+            content_html = getattr(s, "content", "") or ""
+            m = re.search(r"<h[12][^>]*>(.*?)</h[12]>", content_html, re.IGNORECASE | re.DOTALL)
+            if m:
+                title_text = re.sub(r"<[^>]+>", "", m.group(1)).strip()
+        if title_text:
+            titles.append(title_text)
+
+    # Build two-column alternating layout (1 left, 2 right, 3 left ...)
+    items_html: List[str] = []
+    for i, title in enumerate(titles, start=1):
+        number_html = f"<div class=\"toc-number\">{i}</div>"
+        text_html = f"<span class=\"toc-text\">{title}</span>"
+        items_html.append(f"<div class=\"toc-item\">{number_html}{text_html}</div>")
+
+    # Split into two columns sequentially (1..mid left, mid+1..end right)
+    mid = (len(items_html) + 1) // 2
+    col_left = items_html[:mid]
+    col_right = items_html[mid:]
+
+    left_html = "".join(col_left)
+    right_html = "".join(col_right)
+
+    # Emit HTML/CSS matching the user's TOC style exactly (dynamic content only)
+    toc_html = f"""
+    <div class=\"slide-container bg-white flex flex-col\">
+      <style>
+        body {{ margin:0; padding:0; background:#FFFFFF; color:#2E2E38; font-family: Arial, sans-serif; }}
+        .slide-container {{ width:1280px; min-height:720px; position:relative; overflow:hidden; }}
+        .accent-line {{ background-color:#1A9AFA; height:4px; width:80px; }}
+        .toc-container {{ padding-left:100px; padding-right:100px; }}
+        .toc-item {{ display:flex; align-items:center; margin-bottom:12px; }}
+        .toc-number {{ width:32px; height:32px; display:flex; align-items:center; justify-content:center; border-radius:50%; background-color:#1A9AFA; color:#fff; font-weight:bold; margin-right:16px; }}
+        .toc-text {{ font-size:18px; }}
+        .grid {{ display:grid; }}
+        .grid-cols-2 {{ grid-template-columns: 1fr 1fr; }}
+        .gap-x-12 {{ column-gap:48px; }}
+        .gap-y-4 {{ row-gap:16px; }}
+        .w-full {{ width:100%; }}
+        .h-2 {{ height:8px; }}
+        .h-12 {{ height:48px; }}
+        .absolute {{ position:absolute; }}
+        .relative {{ position:relative; }}
+        .left-0 {{ left:0; }}
+        .bottom-0 {{ bottom:0; }}
+        .mt-16 {{ margin-top:64px; }}
+        .mb-6 {{ margin-bottom:24px; }}
+        .mb-8 {{ margin-bottom:32px; }}
+        .mb-2 {{ margin-bottom:8px; }}
+        .text-4xl {{ font-size:32px; font-weight:700; }}
+      </style>
+      <div class=\"w-full h-2 bg-white\"></div>
+      <div class=\"absolute left-0 top-0 bottom-0 w-12 bg-white\"></div>
+      <div class=\"flex flex-col toc-container mt-16\">
+        <div class=\"mb-6\">
+          <h1 class=\"text-4xl mb-2\">Table of Contents</h1>
+          <div class=\"accent-line mb-8\"></div>
+        </div>
+        <div class=\"grid grid-cols-2 gap-x-12 gap-y-4\">
+          <div>{left_html}</div>
+          <div>{right_html}</div>
+        </div>
+      </div>
+      <div class=\"w-full h-12 bg-white mt-auto relative\">
+        <div class=\"absolute left-0 bottom-0 h-2\" style=\"width:33.333%; background-color:#1A9AFA;\"></div>
+      </div>
+    </div>
+    """
+    return toc_html
+
+def _rebuild_toc(deck: html_slides.HtmlDeck) -> None:
+    try:
+        toc_html = _build_toc_html_from_deck(deck)
+        # Use header inside custom content; keep slide title empty to avoid duplication
+        toc_slide = html_slides.Slide(title="", subtitle="", content=toc_html, slide_type="custom")
+        deck.set_slide_at_position(1, toc_slide)
+    except Exception:
+        pass
+def _run_demo_flow(session_id: str) -> None:
+    try:
+        # Reset deck and attach to chatbot instance
+        global html_deck, chatbot_instance
+        html_deck = html_slides.HtmlDeck(theme=ey_theme)
+        chatbot_instance.html_deck = html_deck
+
+        # Step 1: planning message
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content=(
+                "I'll create a concise commercial due diligence report on Heineken in EY‑Parthenon style. "
+                "Let me outline the plan and set up the presentation."
+            ),
+        )
+
+        # Step 2: show a tool being used (planning)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Planning research scope and slide structure for CDD",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Scope defined: company overview, market attractiveness, competition, financial KPIs, risks, and outlook.",
+            metadata={"title": "Agent tool result"}
+        )
+
+        # Step 3: more thinking, then generate first slide
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content=(
+                "Initializing the presentation system and building the title slide."
+            ),
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.2)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[0], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 1 generated: Title",
+            metadata={"title": "Agent tool result"}
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Continuing with table of contents...",
+        )
+        time.sleep(0.6)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Continuing with table of contents...",
+        )
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Setting up agenda and slide structure",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        # Build and set TOC dynamically at position 1
+        _rebuild_toc(html_deck)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 2 generated: Table of Contents",
+            metadata={"title": "Agent tool result"}
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Executive summary...",
+        )
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Drafting executive summary across highlights, market, risks & opportunities",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[10], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 3 generated: Executive Summary",
+            metadata={"title": "Agent tool result"}
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Company overview & model...",
+        )
+        time.sleep(1.0)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Compiling company profile, strategy, and brand portfolio",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[2], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 4 generated: Business Overview & Model",
+            metadata={"title": "Agent tool result"}
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Value chain position...",
+        )
+        time.sleep(1.0)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Analyzing value chain to map upstream and downstream strengths",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.2)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[3], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 5 generated: Value Chain Position",
+            metadata={"title": "Agent tool result"}
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Market attractiveness...",
+        )
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Synthesizing market size, growth and regional attractiveness",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[4], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 6 generated: Market Attractiveness",
+            metadata={"title": "Agent tool result"}
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Segmentation & outlook...",
+        )
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Building segmentation charts and growth outlook",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[5], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 7 generated: Beer Market Segmentation & Outlook",
+            metadata={"title": "Agent tool result"}
+        )
+        # Slide 7: Segments Served vs Competitors
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Analyzing market segment coverage against key competitors.",
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Analyzing market segment coverage and competitive positioning",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[6], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 8 generated: Segments Served vs Competitors",
+            metadata={"title": "Agent tool result"}
+        )
+
+        # Slide 8: Key Growth Drivers & Risks
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Assessing key growth drivers and risks.",
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Evaluating growth drivers and risk factors",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[7], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 9 generated: Key Growth Drivers & Risks",
+            metadata={"title": "Agent tool result"}
+        )
+
+        # Note: We'll add Opportunities & Threats at the end
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Noting opportunities and threats for the closing section.",
+        )
+
+        # Slide 10 -> 11: Financial Performance Overview
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Summarizing financial performance and regional highlights.",
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Compiling financial KPIs and regional performance",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[8], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 11 generated: Financial Performance Overview",
+            metadata={"title": "Agent tool result"}
+        )
+
+        # Slide 11 -> 12: Competitive Landscape (global & regional)
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Mapping the broader competitive landscape globally and regionally.",
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Compiling competitive landscape and regional players",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[9], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 12 generated: Competitive Landscape",
+            metadata={"title": "Agent tool result"}
+        )
+
+        # Slide 12 -> 13: Competitor Benchmarking
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Benchmarking Heineken against peers on KPIs and positioning.",
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Compiling benchmarking table and comparative radar",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[11], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 13 generated: Competitor Benchmarking",
+            metadata={"title": "Agent tool result"}
+        )
+
+        # Slide 13 -> 14: Heineken Competitive Position
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Summarizing Heineken's competitive position: strengths, challenges, advantages.",
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Drafting competitive position summary",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[12], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 13 generated: Heineken Competitive Position",
+            metadata={"title": "Agent tool result"}
+        )
+
+        # Final: Opportunities & Threats
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Finally: Evaluating opportunities and threats.",
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Synthesizing opportunities and threats",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[13], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 14 generated: Opportunities & Threats",
+            metadata={"title": "Agent tool result"}
+        )
+
+        # Regenerate TOC at end to include all slides and correct order
+        _rebuild_toc(html_deck)
+
+        # Final summary message (1–10)
+        time.sleep(0.6)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content=(
+                "All set. Here's your deck outline:\n\n"
+                "1) Title – Commercial Due Diligence: Heineken\n"
+                "2) Table of Contents – agenda of the sections\n"
+                "3) Executive Summary – investment highlights, market view, risks & opportunities\n"
+                "4) Business Overview & Model – profile, strategy, brands\n"
+                "5) Value Chain Position – upstream/downstream activities\n"
+                "6) Market Attractiveness – size, growth, regions, trends\n"
+                "7) Beer Market Segmentation & Outlook – mix and CAGR\n"
+                "8) Segments Served vs Competitors – coverage by segment and region\n"
+                "9) Key Growth Drivers & Risks – drivers, headwinds, and exposures\n"
+                "10) Financial Performance Overview – KPIs and regional highlights\n"
+                "11) Competitive Landscape – global and regional players\n"
+                "12) Competitor Benchmarking – KPIs, market share, and positioning\n"
+                "13) Heineken Competitive Position – strengths, challenges, and advantages\n"
+                "14) Opportunities & Threats – strategic levers and headwinds\n\n"
+                "Tell me what to add or edit next (e.g., benchmarks, risks, KPIs)."
+            ),
+        )
+    except Exception as e:
+        _append_api_message(session_id, role="assistant", content=f"Demo flow error: {e}")
 
 # Pydantic models for API requests/responses
 class ChatMessage(BaseModel):
@@ -152,17 +1405,24 @@ async def chat(request: ChatRequest):
             conv = get_or_create_conversation(session_id)
             return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
         
-        # Add user message to conversation
+        # Demo static mode: bypass LLM and tools, render predefined slides
+        if DEMO_STATIC_MODE:
+            # Minimal transcript: add user only, then stream demo steps asynchronously
+            update_conversations_with_openai_message(session_id, {"role": "user", "content": user_input})
+            import threading
+            t = threading.Thread(target=_run_demo_flow, args=(session_id,))
+            t.daemon = True
+            t.start()
+            conv = get_or_create_conversation(session_id)
+            return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
+
+        # Normal mode: Add user message and process asynchronously
         user_msg_openai = {"role": "user", "content": user_input}
         update_conversations_with_openai_message(session_id, user_msg_openai)
-        
-        # Start background processing
         import threading
         thread = threading.Thread(target=process_conversation_sync, args=(session_id,))
         thread.daemon = True
         thread.start()
-        
-        # Return immediately with user message added
         conv = get_or_create_conversation(session_id)
         return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
         

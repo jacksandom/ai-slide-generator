@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import ChatInterface from './components/ChatInterface';
 import SlideViewer from './components/SlideViewer';
@@ -158,7 +158,7 @@ const LinkButtonBlue = styled.button`
 
 const MainContent = styled.div`
   display: grid;
-  grid-template-columns: 1fr 2fr;
+  grid-template-columns: 0.85fr 2.15fr; /* widen slide column a bit more */
   gap: 0;
   flex: 1;
   overflow: hidden;
@@ -186,7 +186,7 @@ const ChatSection = styled.div`
 `;
 
 const SlideSection = styled.div`
-  padding: 20px;
+  padding: 8px; /* tighter to maximize viewport */
   background: #F6F6FA;
   display: flex;
   flex-direction: column;
@@ -194,7 +194,7 @@ const SlideSection = styled.div`
   min-height: 0;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
   border-radius: 16px;
-  margin: 8px;
+  margin: 8px 8px 8px 4px; /* reclaim a few pixels on the right */
 `;
 
 const SectionTitle = styled.h2`
@@ -212,18 +212,34 @@ const SectionTitle = styled.h2`
 const App: React.FC = () => {
   const [slidesHtml, setSlidesHtml] = useState<string>('');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const refreshAbortRef = useRef<AbortController | null>(null);
+  const refreshDebounceRef = useRef<any>(null);
 
-  const refreshSlides = async () => {
+  const runRefresh = async () => {
+    // cancel any in-flight request
+    try { refreshAbortRef.current?.abort(); } catch {}
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
     setIsRefreshing(true);
+    // safety clear in case of long network hang
+    const safety = setTimeout(() => setIsRefreshing(false), 5000);
     try {
-      const response = await fetch('http://localhost:8000/slides/html');
+      const response = await fetch('http://localhost:8000/slides/html', { signal: controller.signal });
       const data = await response.json();
-      setSlidesHtml(data.html);
+      if (data?.html !== undefined) setSlidesHtml(data.html);
     } catch (error) {
-      console.error('Error refreshing slides:', error);
+      if ((error as any)?.name !== 'AbortError') {
+        console.error('Error refreshing slides:', error);
+      }
     } finally {
+      clearTimeout(safety);
       setIsRefreshing(false);
     }
+  };
+
+  const refreshSlides = () => {
+    if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
+    refreshDebounceRef.current = setTimeout(runRefresh, 300);
   };
 
   const resetSlides = async () => {

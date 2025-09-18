@@ -1007,6 +1007,7 @@ class HtmlDeck:
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
   {css_overrides}
   </style>
@@ -1049,6 +1050,23 @@ class HtmlDeck:
     
     // Initialize and focus for keyboard events
     deck.initialize().then(() => {{
+      // Execute inline scripts in current slide (e.g., Chart.js initializers)
+      const runInlineScripts = (slideEl) => {{
+        try {{
+          if (!slideEl) return;
+          const scripts = slideEl.querySelectorAll('script:not([data-executed])');
+          scripts.forEach((s) => {{
+            const sc = document.createElement('script');
+            for (const attr of s.attributes) {{ sc.setAttribute(attr.name, attr.value); }}
+            sc.text = s.textContent || '';
+            s.parentNode.replaceChild(sc, s);
+            sc.setAttribute('data-executed', 'true');
+          }});
+          // Nudge layout so charts compute sizes
+          setTimeout(() => {{ try {{ window.dispatchEvent(new Event('resize')); }} catch (e) {{}} }}, 50);
+        }} catch (e) {{}}
+      }};
+
       // Ensure the deck can receive keyboard events
       const reveal = document.querySelector('.reveal');
       if (reveal) {{
@@ -1078,6 +1096,10 @@ class HtmlDeck:
               slideNumber.style.display = 'none';
             }}
           }}
+          // Execute inline scripts on newly presented slide
+          const currentSlide = event.currentSlide || event.slide;
+          runInlineScripts(currentSlide);
+          setTimeout(() => runInlineScripts(currentSlide), 60);
         }});
         
         // Check if we have real slide content and set appropriate classes
@@ -1092,6 +1114,10 @@ class HtmlDeck:
             slideNumber.textContent = `1/${{total}}`;
             slideNumber.setAttribute('data-total', total.toString());
           }}
+          // Execute scripts in initially visible slide
+          const initial = deck.getCurrentSlide && deck.getCurrentSlide();
+          runInlineScripts(initial);
+          setTimeout(() => runInlineScripts(initial), 60);
         }} else {{
           if (reveal) {{
             reveal.classList.remove('has-real-slides');

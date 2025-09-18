@@ -382,6 +382,7 @@ DEMO_SLIDES: List[str] = [
         .demo-segment-slide .accent-blue{color:#1A9AFA}
         .demo-segment-slide .segment-card{border-left:4px solid #1A9AFA;padding:12px;background:#f5f5f7}
         .demo-segment-slide .placeholder{height:250px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
+        .demo-segment-slide .chart-container{height:250px;position:relative}
       </style>
       <div class=\"slide-container\">
         <div class=\"content-container\">
@@ -392,12 +393,12 @@ DEMO_SLIDES: List[str] = [
           <div class=\"grid2\">
             <div>
               <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Market by Segment (2024)</h2>
-              <div class=\"placeholder\">Pie chart (Premium/Mainstream/Economy/Craft)</div>
+              <div class=\"chart-container\"><canvas id=\"seg_pie\"></canvas></div>
               <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:4px\">Source: Industry analysis</div>
             </div>
             <div>
               <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Projected Growth by Segment (CAGR 2024–2028)</h2>
-              <div class=\"placeholder\">Bar chart (CAGR by segment)</div>
+              <div class=\"chart-container\"><canvas id=\"seg_cagr\"></canvas></div>
               <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:4px\">Source: IWSR, EY‑Parthenon analysis</div>
             </div>
           </div>
@@ -408,6 +409,52 @@ DEMO_SLIDES: List[str] = [
           </div>
         </div>
         <div class=\"w-full\" style=\"height:48px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
+        <script>
+          try {
+            // Pie: market share by price point (matches card values below)
+            const pieCtx = document.getElementById('seg_pie') && document.getElementById('seg_pie').getContext('2d');
+            if (pieCtx && window.Chart) {
+              new Chart(pieCtx, {
+                type: 'pie',
+                data: {
+                  labels: ['Premium', 'Mainstream', 'Economy', 'Craft/Specialty'],
+                  datasets: [{
+                    data: [26, 62, 12, 9],
+                    backgroundColor: ['#1A9AFA', '#B4E2FF', '#747480', '#3DB5FF'],
+                    borderWidth: 0
+                  }]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } } }
+                }
+              });
+            }
+            // Bar: CAGR by segment
+            const barCtx = document.getElementById('seg_cagr') && document.getElementById('seg_cagr').getContext('2d');
+            if (barCtx && window.Chart) {
+              new Chart(barCtx, {
+                type: 'bar',
+                data: {
+                  labels: ['Premium', 'Craft', 'LONO', 'Mainstream'],
+                  datasets: [{
+                    label: 'CAGR %',
+                    data: [4.5, 9.0, 8.0, 1.2],
+                    backgroundColor: ['#1A9AFA', '#3DB5FF', '#7ECCFF', '#B4E2FF'],
+                    borderWidth: 0
+                  }]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  scales: { y: { beginAtZero: true, max: 10, title: { display: true, text: 'CAGR %' } } },
+                  plugins: { legend: { display: false } }
+                }
+              });
+            }
+          } catch (e) {}
+        </script>
       </div>
     </div>
     """
@@ -431,6 +478,7 @@ DEMO_SLIDES: List[str] = [
         .demo-competitors-slide .coverage-moderate{color:#3DB5FF}
         .demo-competitors-slide .coverage-limited{color:#B4E2FF}
         .demo-competitors-slide .placeholder{height:250px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
+        .demo-competitors-slide .chart-container{height:250px;position:relative}
       </style>
       <div class=\"slide-container\">
         <div class=\"content-container\">
@@ -455,12 +503,37 @@ DEMO_SLIDES: List[str] = [
           </div>
           <div>
             <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Regional Market Strength</h2>
-            <div class=\"placeholder\">Radar chart: Europe / Americas / APAC / Africa & ME</div>
+            <div class=\"chart-container\"><canvas id=\"seg_strength_radar\"></canvas></div>
             <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:8px\">Source: Market share data, annual reports, EY‑Parthenon analysis</div>
           </div>
           <div style=\"margin-top:12px;font-size:14px\"><b>Key Insight:</b> Heineken leads in premium and LONO across Europe and Africa; AB InBev dominates in the Americas; Carlsberg is strong in Asia.</div>
         </div>
         <div class=\"w-full\" style=\"height:48px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
+        <script>
+          try {
+            const rctx = document.getElementById('seg_strength_radar') && document.getElementById('seg_strength_radar').getContext('2d');
+            if (rctx && window.Chart) {
+              new Chart(rctx, {
+                type: 'radar',
+                data: {
+                  labels: ['Europe', 'Americas', 'APAC', 'Africa & ME'],
+                  datasets: [
+                    { label:'Heineken', data:[9, 7, 8, 8], borderColor:'#1A9AFA', backgroundColor:'rgba(26,154,250,0.15)', pointBackgroundColor:'#1A9AFA' },
+                    { label:'AB InBev', data:[8, 10, 8, 7], borderColor:'#3DB5FF', backgroundColor:'rgba(61,181,255,0.12)', pointBackgroundColor:'#3DB5FF' },
+                    { label:'Carlsberg', data:[8, 6, 8, 5], borderColor:'#7ECCFF', backgroundColor:'rgba(126,204,255,0.12)', pointBackgroundColor:'#7ECCFF' },
+                    { label:'Molson Coors', data:[7, 8, 4, 4], borderColor:'#B4E2FF', backgroundColor:'rgba(180,226,255,0.12)', pointBackgroundColor:'#B4E2FF' }
+                  ]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  scales: { r: { suggestedMin: 0, suggestedMax: 10, grid: { color:'#e5e7eb' }, angleLines: { color:'#e5e7eb' }, ticks: { display:false } } },
+                  plugins: { legend: { position:'bottom', labels: { boxWidth:12, padding:10, font:{ size:11 } } } }
+                }
+              });
+            }
+          } catch (e) {}
+        </script>
       </div>
     </div>
     """
@@ -530,6 +603,7 @@ DEMO_SLIDES: List[str] = [
         .demo-financial-slide .pos{color:#10B981}
         .demo-financial-slide .neg{color:#EF4444}
         .demo-financial-slide .placeholder{height:220px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
+        .demo-financial-slide .chart-container{height:220px;position:relative}
         .demo-financial-slide .data-table{width:100%;border-collapse:collapse}
         .demo-financial-slide .data-table th{background:#f5f5f7;padding:8px;text-align:left;font-weight:700;border-bottom:2px solid #1A9AFA}
         .demo-financial-slide .data-table td{padding:8px;border-bottom:1px solid #e5e5e5}
@@ -548,12 +622,12 @@ DEMO_SLIDES: List[str] = [
           <div class=\"grid2\">
             <div>
               <h2 class=\"text-xl font-semibold accent-blue mb-3\">Financial Performance (€B)</h2>
-              <div class=\"placeholder\">Bar chart (2023 vs 2024: Revenue, Op Profit, Net Profit, FCF)</div>
+              <div class=\"chart-container\"><canvas id=\"fp_bar\"></canvas></div>
               <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:4px\">Source: Heineken Annual Report 2024</div>
             </div>
             <div>
               <h2 class=\"text-xl font-semibold accent-blue mb-3\">Revenue by Region (2024)</h2>
-              <div class=\"placeholder\">Doughnut chart (EU/AM/APAC/AME)</div>
+              <div class=\"chart-container\"><canvas id=\"fp_doughnut\"></canvas></div>
               <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:4px\">Source: Heineken Annual Report 2024</div>
             </div>
           </div>
@@ -573,6 +647,48 @@ DEMO_SLIDES: List[str] = [
           </div>
         </div>
         <div class=\"w-full\" style=\"height:48px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
+        <script>
+          try {
+            const barCtx = document.getElementById('fp_bar') && document.getElementById('fp_bar').getContext('2d');
+            if (barCtx && window.Chart) {
+              new Chart(barCtx, {
+                type: 'bar',
+                data: {
+                  labels: ['Revenue', 'Op Profit', 'Net Profit', 'FCF'],
+                  datasets: [
+                    { label: '2023', data: [29.0, 4.2, 2.6, 1.76], backgroundColor: '#7ECCFF', borderWidth: 0 },
+                    { label: '2024', data: [29.96, 4.51, 2.74, 3.06], backgroundColor: '#1A9AFA', borderWidth: 0 }
+                  ]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  scales: { y: { beginAtZero: true, title: { display: false } } },
+                  plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } } }
+                }
+              });
+            }
+            const doughCtx = document.getElementById('fp_doughnut') && document.getElementById('fp_doughnut').getContext('2d');
+            if (doughCtx && window.Chart) {
+              new Chart(doughCtx, {
+                type: 'doughnut',
+                data: {
+                  labels: ['Europe', 'Americas', 'APAC', 'Africa & ME'],
+                  datasets: [{
+                    data: [31, 29, 27, 13],
+                    backgroundColor: ['#1A9AFA', '#3DB5FF', '#7ECCFF', '#B4E2FF'],
+                    borderWidth: 0
+                  }]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } } }
+                }
+              });
+            }
+          } catch (e) {}
+        </script>
       </div>
     </div>
     """
@@ -709,6 +825,7 @@ DEMO_SLIDES: List[str] = [
         .demo-benchmark-slide .placeholder{height:250px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
         .demo-benchmark-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:24px}
         .demo-benchmark-slide .card{border-left:4px solid #1A9AFA;padding:12px;background:#f5f5f7}
+        .demo-benchmark-slide .chart-container{height:250px;position:relative}
       </style>
       <div class=\"slide-container\">
         <div class=\"content-container\">
@@ -740,7 +857,7 @@ DEMO_SLIDES: List[str] = [
           <div class=\"grid2\">
             <div>
               <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Competitive Position Comparison</h2>
-              <div class=\"placeholder\">Radar chart: Heineken vs AB InBev vs Carlsberg</div>
+              <div class=\"chart-container\"><canvas id=\"bench_radar\"></canvas></div>
               <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:8px\">Source: Company reports, industry analysis, EY‑Parthenon analysis (2024–2025)</div>
             </div>
             <div class=\"card\">
@@ -750,6 +867,30 @@ DEMO_SLIDES: List[str] = [
           </div>
         </div>
         <div style=\"height:48px;position:relative\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA\"></div></div>
+        <script>
+          try {
+            const radarCtx = document.getElementById('bench_radar') && document.getElementById('bench_radar').getContext('2d');
+            if (radarCtx && window.Chart) {
+              new Chart(radarCtx, {
+                type: 'radar',
+                data: {
+                  labels: ['Premium Strength', 'Mainstream Scale', 'LONO Portfolio', 'Regional Breadth', 'Profitability'],
+                  datasets: [
+                    { label: 'Heineken', data: [8, 6, 9, 8, 8], borderColor: '#1A9AFA', backgroundColor: 'rgba(26,154,250,0.15)', pointBackgroundColor: '#1A9AFA' },
+                    { label: 'AB InBev', data: [8, 10, 7, 9, 8], borderColor: '#3DB5FF', backgroundColor: 'rgba(61,181,255,0.12)', pointBackgroundColor: '#3DB5FF' },
+                    { label: 'Carlsberg', data: [7, 6, 6, 7, 7], borderColor: '#7ECCFF', backgroundColor: 'rgba(126,204,255,0.12)', pointBackgroundColor: '#7ECCFF' }
+                  ]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  scales: { r: { suggestedMin: 0, suggestedMax: 10, grid: { color: '#e5e7eb' }, angleLines: { color: '#e5e7eb' }, ticks: { display: false } } },
+                  plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10, font: { size: 11 } } } }
+                }
+              });
+            }
+          } catch (e) {}
+        </script>
       </div>
     </div>
     """
@@ -857,6 +998,106 @@ DEMO_SLIDES: List[str] = [
         </div>
         <div style=\"height:48px;position:relative\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA\"></div></div>
       </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-5yr-forecast-slide\">
+      <style>
+        .demo-5yr-forecast-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-5yr-forecast-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-5yr-forecast-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-5yr-forecast-slide .content-container{padding-left:100px;padding-right:100px}
+        .demo-5yr-forecast-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-5yr-forecast-slide .text-2xl{font-size:24px}
+        .demo-5yr-forecast-slide .font-bold{font-weight:700}
+        .demo-5yr-forecast-slide .font-semibold{font-weight:600}
+        .demo-5yr-forecast-slide .accent-blue{color:#1A9AFA}
+        .demo-5yr-forecast-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:12px}
+        .demo-5yr-forecast-slide .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:8px}
+        .demo-5yr-forecast-slide .segment-card{border-left:4px solid #1A9AFA;padding:12px;background:#f5f5f7}
+        .demo-5yr-forecast-slide .chart-container{height:250px;width:100%;position:relative}
+      </style>
+      <div class=\"slide-container bg-white flex flex-col\">
+        <div class=\"w-full h-2 bg-white\"></div>
+        <div class=\"absolute left-0 top-0 bottom-0 w-12 bg-white\"></div>
+        <div class=\"flex flex-col content-container mt-12 mb-8\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">5-Year Segment-Based Growth Forecast</h1>
+            <div class=\"accent-line mb-6\"></div>
+          </div>
+          <div class=\"grid2\">
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Growth Projection by Segment (2025-2030)</h2>
+              <div class=\"chart-container mb-2\">
+                <canvas id=\"segmentChart\"></canvas>
+              </div>
+              <div style=\"font-size:12px;color:#6b7280;text-align:center\">Source: Industry analysis, EY-Parthenon forecasts</div>
+            </div>
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">CAGR by Region (2025-2030)</h2>
+              <div class=\"chart-container mb-2\">
+                <canvas id=\"regionChart\"></canvas>
+              </div>
+              <div style=\"font-size:12px;color:#6b7280;text-align:center\">Source: Market forecasts, IWSR data, EY-Parthenon analysis</div>
+            </div>
+          </div>
+          <div class=\"grid3 mt-2\">
+            <div class=\"segment-card\">
+              <h3 class=\"font-bold mb-1\">Premium Segment</h3>
+              <div><span class=\"data-highlight\">Overall CAGR:</span> 4.5%</div>
+              <div><span class=\"data-highlight\">Top Market:</span> APAC (6.8%)</div>
+              <div><span class=\"data-highlight\">Key Drivers:</span> Premiumization, craft crossover</div>
+            </div>
+            <div class=\"segment-card\">
+              <h3 class=\"font-bold mb-1\">LONO &amp; Specialty</h3>
+              <div><span class=\"data-highlight\">LONO CAGR:</span> 8.0%</div>
+              <div><span class=\"data-highlight\">Craft CAGR:</span> 9.0%</div>
+              <div><span class=\"data-highlight\">Top Region:</span> Europe (10.2%)</div>
+            </div>
+            <div class=\"segment-card\">
+              <h3 class=\"font-bold mb-1\">Mainstream &amp; Economy</h3>
+              <div><span class=\"data-highlight\">Mainstream CAGR:</span> 1.2%</div>
+              <div><span class=\"data-highlight\">Economy CAGR:</span> 0.8%</div>
+              <div><span class=\"data-highlight\">Leading Growth:</span> Africa &amp; ME (2.4%)</div>
+            </div>
+          </div>
+        </div>
+        <div class=\"w-full h-12 bg-white mt-auto relative\">
+          <div class=\"absolute left-0 bottom-0 h-2\" style=\"width:33.333%; background-color:#1A9AFA;\"></div>
+        </div>
+      </div>
+      <script>
+        try {
+          const segmentCtx = document.getElementById('segmentChart') && document.getElementById('segmentChart').getContext('2d');
+          if (segmentCtx && window.Chart) {
+            new Chart(segmentCtx, {
+              type: 'line',
+              data: { labels: ['2025','2026','2027','2028','2029','2030'], datasets: [
+                { label:'Premium', data:[100,105,110,114,119,124], borderColor:'#1A9AFA', backgroundColor:'rgba(26,154,250,0.1)', borderWidth:2, fill:true, tension:0.3 },
+                { label:'Craft/Specialty', data:[100,109,119,129,141,154], borderColor:'#3DB5FF', backgroundColor:'rgba(61,181,255,0.1)', borderWidth:2, fill:true, tension:0.3 },
+                { label:'LONO', data:[100,108,117,126,136,147], borderColor:'#7ECCFF', backgroundColor:'rgba(126,204,255,0.1)', borderWidth:2, fill:true, tension:0.3 },
+                { label:'Mainstream', data:[100,101,102,104,105,106], borderColor:'#B4E2FF', backgroundColor:'rgba(180,226,255,0.1)', borderWidth:2, fill:true, tension:0.3 },
+                { label:'Economy', data:[100,101,101,102,103,104], borderColor:'#747480', backgroundColor:'rgba(116,116,128,0.1)', borderWidth:2, fill:true, tension:0.3 }
+              ]},
+              options: { responsive:true, maintainAspectRatio:false, scales:{ y:{ title:{ display:true, text:'Index (2025=100)' }, min:95 } }, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, padding:10, font:{ size:11 } } } } }
+            });
+          }
+          const regionCtx = document.getElementById('regionChart') && document.getElementById('regionChart').getContext('2d');
+          if (regionCtx && window.Chart) {
+            new Chart(regionCtx, {
+              type: 'bar',
+              data: { labels:['Europe','Americas','Asia Pacific','Africa & ME'], datasets:[
+                { label:'Premium', data:[3.8,4.2,6.8,5.2], backgroundColor:'#1A9AFA', borderWidth:0 },
+                { label:'Craft', data:[10.2,8.5,8.8,7.0], backgroundColor:'#3DB5FF', borderWidth:0 },
+                { label:'LONO', data:[9.8,7.2,6.5,4.5], backgroundColor:'#7ECCFF', borderWidth:0 },
+                { label:'Mainstream', data:[0.8,1.1,1.8,2.4], backgroundColor:'#B4E2FF', borderWidth:0 }
+              ]},
+              options: { responsive:true, maintainAspectRatio:false, scales:{ y:{ beginAtZero:true, title:{ display:true, text:'CAGR %' }, max:12 }, x:{ stacked:false } }, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, padding:10, font:{ size:11 } } } } }
+            });
+          }
+        } catch (e) {}
+      </script>
     </div>
     """
 ]
@@ -1287,6 +1528,28 @@ def _run_demo_flow(session_id: str) -> None:
             metadata={"title": "Agent tool result"}
         )
 
+        # Slide 15: 5-Year Segment-Based Growth Forecast
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Building 5-year segment-based growth forecast charts.",
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Rendering line and bar charts using EY palette",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[14], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 15 generated: 5-Year Segment-Based Growth Forecast",
+            metadata={"title": "Agent tool result"}
+        )
+
         # Regenerate TOC at end to include all slides and correct order
         _rebuild_toc(html_deck)
 
@@ -1310,7 +1573,8 @@ def _run_demo_flow(session_id: str) -> None:
                 "11) Competitive Landscape – global and regional players\n"
                 "12) Competitor Benchmarking – KPIs, market share, and positioning\n"
                 "13) Heineken Competitive Position – strengths, challenges, and advantages\n"
-                "14) Opportunities & Threats – strategic levers and headwinds\n\n"
+                "14) Opportunities & Threats – strategic levers and headwinds\n"
+                "15) 5-Year Segment-Based Growth Forecast – projections by segment and region\n\n"
                 "Tell me what to add or edit next (e.g., benchmarks, risks, KPIs)."
             ),
         )

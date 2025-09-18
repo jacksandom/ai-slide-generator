@@ -1100,6 +1100,186 @@ DEMO_SLIDES: List[str] = [
       </script>
     </div>
     """
+    ,
+    """
+    <div class=\"demo-scenarios-slide\">
+      <style>
+        .demo-scenarios-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-scenarios-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-scenarios-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-scenarios-slide .content-container{padding-left:100px;padding-right:100px;margin-top:48px;margin-bottom:24px}
+        .demo-scenarios-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-scenarios-slide .font-bold{font-weight:700}
+        .demo-scenarios-slide .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px}
+        .demo-scenarios-slide .scenario-card{border-left:4px solid #1A9AFA;padding:12px;background:#f5f5f7;height:100%}
+        .demo-scenarios-slide .scenario-bull{border-left-color:#00A550}
+        .demo-scenarios-slide .scenario-bear{border-left-color:#FF6B6B}
+        .demo-scenarios-slide .bull-highlight{color:#00A550;font-weight:700}
+        .demo-scenarios-slide .bear-highlight{color:#FF6B6B;font-weight:700}
+        .demo-scenarios-slide .base-highlight{color:#1A9AFA;font-weight:700}
+        .demo-scenarios-slide .chart-container{height:250px;position:relative}
+      </style>
+      <div class=\"slide-container bg-white flex flex-col\">
+        <div class=\"w-full h-2 bg-white\"></div>
+        <div class=\"absolute left-0 top-0 bottom-0 w-12 bg-white\"></div>
+        <div class=\"flex flex-col content-container mt-12 mb-8\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Bear, Base, and Bull Case Scenarios</h1>
+            <div class=\"accent-line mb-6\"></div>
+          </div>
+          <div class=\"mb-6\">
+            <div class=\"chart-container\" style=\"height:256px\"><canvas id=\"scenarioChart\"></canvas></div>
+            <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:8px\">Heineken 5-Year Growth Scenarios (CAGR 2025-2030)</div>
+          </div>
+          <div class=\"grid3 mb-6\">
+            <div>
+              <div class=\"scenario-card scenario-bear\">
+                <h3 class=\"font-bold mb-2\">Bear Case: <span class=\"bear-highlight\">2.1% CAGR</span></h3>
+                <ul style=\"margin-left:16px;list-style:disc;font-size:14px\">
+                  <li>Increased regulation & taxation</li>
+                  <li>Accelerated decline in EU beer consumption</li>
+                  <li>Economic pressure in emerging markets</li>
+                  <li>Gen Z shift away from alcohol</li>
+                </ul>
+              </div>
+            </div>
+            <div>
+              <div class=\"scenario-card\">
+                <h3 class=\"font-bold mb-2\">Base Case: <span class=\"base-highlight\">4.0% CAGR</span></h3>
+                <ul style=\"margin-left:16px;list-style:disc;font-size:14px\">
+                  <li>Moderate economic growth globally</li>
+                  <li>Premiumization continues</li>
+                  <li>Steady LONO expansion</li>
+                  <li>Stable share in key regions</li>
+                </ul>
+              </div>
+            </div>
+            <div>
+              <div class=\"scenario-card scenario-bull\">
+                <h3 class=\"font-bold mb-2\">Bull Case: <span class=\"bull-highlight\">6.2% CAGR</span></h3>
+                <ul style=\"margin-left:16px;list-style:disc;font-size:14px\">
+                  <li>Strong APAC & Africa expansion</li>
+                  <li>LONO leadership & market creation</li>
+                  <li>Beyond-beer innovations</li>
+                  <li>Digital transformation acceleration</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div>
+            <h3 class=\"font-bold mb-2\">CAGR by Segment (2025-2030)</h3>
+            <table class=\"data-table\" style=\"width:100%;border-collapse:collapse\">
+              <thead>
+                <tr>
+                  <th>Segment</th>
+                  <th style=\"text-align:right\"><span class=\"bear-highlight\">Bear Case</span></th>
+                  <th style=\"text-align:right\"><span class=\"base-highlight\">Base Case</span></th>
+                  <th style=\"text-align:right\"><span class=\"bull-highlight\">Bull Case</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>Premium Beer</td><td style=\"text-align:right\">3.2%</td><td style=\"text-align:right\">4.5%</td><td style=\"text-align:right\">5.8%</td></tr>
+                <tr><td>Mainstream Beer</td><td style=\"text-align:right\">0.8%</td><td style=\"text-align:right\">1.2%</td><td style=\"text-align:right\">2.4%</td></tr>
+                <tr><td>Craft/Specialty</td><td style=\"text-align:right\">6.5%</td><td style=\"text-align:right\">9.0%</td><td style=\"text-align:right\">12.0%</td></tr>
+                <tr><td>LONO (Low/No Alcohol)</td><td style=\"text-align:right\">5.5%</td><td style=\"text-align:right\">8.0%</td><td style=\"text-align:right\">12.5%</td></tr>
+                <tr><td>Beyond Beer</td><td style=\"text-align:right\">4.5%</td><td style=\"text-align:right\">7.5%</td><td style=\"text-align:right\">11.0%</td></tr>
+                <tr style=\"font-weight:700\"><td>Overall Growth</td><td style=\"text-align:right;color:#FF6B6B\">2.1%</td><td style=\"text-align:right;color:#1A9AFA\">4.0%</td><td style=\"text-align:right;color:#00A550\">6.2%</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class=\"w-full h-12 bg-white mt-auto relative\"><div class=\"absolute left-0 bottom-0 h-2\" style=\"width:33.333%; background-color:#1A9AFA;\"></div></div>
+        <script>
+          try {
+            const sctx = document.getElementById('scenarioChart') && document.getElementById('scenarioChart').getContext('2d');
+            if (sctx && window.Chart) {
+              new Chart(sctx, {
+                type: 'bar',
+                data: { labels:['Premium Beer','Mainstream Beer','Craft/Specialty','LONO','Beyond Beer','Overall Growth'], datasets:[
+                  { label:'Bear Case', data:[3.2,0.8,6.5,5.5,4.5,2.1], backgroundColor:'#FF6B6B', borderWidth:0 },
+                  { label:'Base Case', data:[4.5,1.2,9.0,8.0,7.5,4.0], backgroundColor:'#1A9AFA', borderWidth:0 },
+                  { label:'Bull Case', data:[5.8,2.4,12.0,12.5,11.0,6.2], backgroundColor:'#00A550', borderWidth:0 }
+                ]},
+                options: { responsive:true, maintainAspectRatio:false, scales:{ y:{ beginAtZero:true, max:14, title:{ display:true, text:'CAGR (%)' } } }, plugins:{ legend:{ position:'top', labels:{ boxWidth:12, padding:10, font:{ size:11 } } } } }
+              });
+            }
+          } catch (e) {}
+        </script>
+      </div>
+    </div>
+    """
+    ,
+    """
+    <div class=\"demo-conclusion-slide\">
+      <style>
+        .demo-conclusion-slide{font-family:Arial,sans-serif;color:#2E2E38}
+        .demo-conclusion-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-conclusion-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
+        .demo-conclusion-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-conclusion-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-conclusion-slide .text-2xl{font-size:24px}
+        .demo-conclusion-slide .font-bold{font-weight:700}
+        .demo-conclusion-slide .font-semibold{font-weight:600}
+        .demo-conclusion-slide .accent-blue{color:#1A9AFA}
+        .demo-conclusion-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+        .demo-conclusion-slide .bullet-point{display:flex;margin-bottom:14px}
+        .demo-conclusion-slide .bullet-icon{color:#1A9AFA;margin-right:12px;flex-shrink:0;margin-top:4px}
+        .demo-conclusion-slide .highlight-box{background:#F5F7FA;border-left:4px solid #1A9AFA;padding:16px;margin:16px 0}
+      </style>
+      <div class=\"slide-container bg-white flex flex-col\">
+        <div class=\"w-full h-2 bg-white\"></div>
+        <div class=\"absolute left-0 top-0 bottom-0 w-12 bg-white\"></div>
+        <div class=\"flex flex-col content-container\">
+          <div class=\"mb-6\">
+            <h1 class=\"text-4xl font-bold mb-2\">Conclusion &amp; Recommendations</h1>
+            <div class=\"accent-line mb-8\"></div>
+          </div>
+          <div class=\"grid2\">
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Strategic Assessment</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Strong Market Position:</span> Heineken is well positioned as the world's second-largest brewer with leading premium portfolio</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Premium Leader:</span> Dominant position in premium segment provides pricing power and margin resilience</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Innovation Pipeline:</span> Early mover in LONO category with Heineken 0.0 proving successful growth driver</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Regional Growth:</span> Strong performance in key emerging markets (Brazil, Vietnam, India) offsetting mature European markets</div></div>
+              <div class=\"highlight-box\">
+                <p class=\"text-lg font-semibold mb-1\">EY-Parthenon Assessment</p>
+                <p>Heineken demonstrates strong fundamentals with clear growth strategy and execution capabilities. The company is effectively navigating market evolution with balanced focus on premiumization, innovation, and operational excellence.</p>
+              </div>
+            </div>
+            <div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Key Recommendations</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Accelerate APAC Expansion:</span> Further invest in high-growth markets like Vietnam, India, and selective Chinese urban centers</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Beyond Beer Portfolio:</span> Expand innovation in adjacent categories to capture changing consumer preferences</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Digital Transformation:</span> Continue investing in eB2B platforms, AI-driven operations, and direct-to-consumer channels</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">LONO Leadership:</span> Leverage first-mover advantage to expand non-alcoholic portfolio as category leader</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">ESG Integration:</span> Continue sustainability initiatives that enhance brand value while reducing operational costs</div></div>
+            </div>
+          </div>
+          <div class=\"mt-8\">
+            <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Investment View</h2>
+            <div class=\"flex items-center\">
+              <div class=\"w-1/4 text-center p-4\">
+                <div class=\"text-5xl font-bold accent-blue mb-2\">4-8%</div>
+                <div class=\"text-sm\">Operating Profit (beia) Growth (2025)</div>
+              </div>
+              <div class=\"w-1/4 text-center p-4\">
+                <div class=\"text-5xl font-bold accent-blue mb-2\">15.1%</div>
+                <div class=\"text-sm\">Operating Margin (2024)</div>
+              </div>
+              <div class=\"w-1/2\">
+                <div class=\"highlight-box\">
+                  <p class=\"font-semibold mb-2\">EY-Parthenon Investment Recommendation</p>
+                  <p class=\"text-lg\">BUY / HOLD for long-term value creation</p>
+                  <p class=\"mt-2\">Heineken presents a compelling investment case with disciplined execution of its EverGreen strategy and focus on high-growth premium and LONO segments.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class=\"w-full h-12 bg-white mt-auto relative\"><div class=\"absolute left-0 bottom-0 h-2\" style=\"width:33.333%; background-color:#1A9AFA;\"></div></div>
+      </div>
+    </div>
+    """
 ]
 
 def _append_api_message(session_id: str, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
@@ -1550,6 +1730,50 @@ def _run_demo_flow(session_id: str) -> None:
             metadata={"title": "Agent tool result"}
         )
 
+        # Slide 16: Scenarios (Bear/Base/Bull)
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Comparing bear, base, and bull case scenarios.",
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Rendering scenario comparison chart and table",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[15], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 16 generated: Bear, Base, and Bull Case Scenarios",
+            metadata={"title": "Agent tool result"}
+        )
+
+        # Slide 17: Conclusion & Recommendations
+        time.sleep(0.8)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Next: Drafting conclusion and recommendations.",
+        )
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Summarizing assessment and investment view",
+            metadata={"title": "Agent is using a tool"}
+        )
+        time.sleep(1.0)
+        html_deck.add_custom_html_slide(DEMO_SLIDES[16], title="", subtitle="")
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Slide 17 generated: Conclusion & Recommendations",
+            metadata={"title": "Agent tool result"}
+        )
+
         # Regenerate TOC at end to include all slides and correct order
         _rebuild_toc(html_deck)
 
@@ -1574,7 +1798,9 @@ def _run_demo_flow(session_id: str) -> None:
                 "12) Competitor Benchmarking – KPIs, market share, and positioning\n"
                 "13) Heineken Competitive Position – strengths, challenges, and advantages\n"
                 "14) Opportunities & Threats – strategic levers and headwinds\n"
-                "15) 5-Year Segment-Based Growth Forecast – projections by segment and region\n\n"
+                "15) 5-Year Segment-Based Growth Forecast – projections by segment and region\n"
+                "16) Bear, Base, and Bull Case Scenarios – 3-path outlook\n"
+                "17) Conclusion & Recommendations – strategic takeaways and investment view\n\n"
                 "Tell me what to add or edit next (e.g., benchmarks, risks, KPIs)."
             ),
         )

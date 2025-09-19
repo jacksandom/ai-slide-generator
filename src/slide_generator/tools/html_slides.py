@@ -203,13 +203,58 @@ class SlideTheme:
 
     def build_base_css(self) -> str:
         return f"""
-        /* Reveal.js overrides */
-        html, body {{ height: 100%; margin: 0; }}
+        /* Basic setup */
+        html, body {{ height: 100%; margin: 0; padding: 0; }}
         body {{ background: {self.rgb(self.background_rgb)}; }}
+        
+        /* Reveal.js core dimensions - exact 1280x720 */
+        .reveal {{ 
+          width: 1280px !important; 
+          height: 720px !important; 
+          padding: 0 !important;
+          margin: 0 !important;
+        }}
+        .reveal .slides {{ 
+          width: 1280px !important; 
+          height: 720px !important; 
+          padding: 0 !important;
+          margin: 0 !important;
+        }}
+        .reveal .slides section {{
+          width: 1280px !important;
+          height: 720px !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }}
+        
+        /* Slide containers - perfect alignment */
+        .slide-container {{
+          width: 1280px !important;
+          height: 720px !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          position: relative;
+        }}
+        
+        /* Content slides - no positioning conflicts */
+        .reveal .content-slide {{
+          width: 100% !important;
+          height: 100% !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          display: flex;
+          flex-direction: column;
+        }}
+        /* Typography */
         .reveal {{ font-family: {self.font_family}; }}
         .reveal h1.title, .reveal h2.title {{
           font-size: clamp(20px, 3.2vw, {self.title_font_size_px}px);
           color: {self.rgb(self.title_color_rgb)};
+          margin: 0;
         }}
         .reveal .subtitle {{
           font-size: clamp(14px, 2.2vw, {self.subtitle_font_size_px}px);
@@ -219,77 +264,57 @@ class SlideTheme:
           font-size: clamp(12px, 2vw, {self.body_font_size_px}px);
           color: {self.rgb(self.body_color_rgb)};
         }}
-        .reveal {{ height: 100vh; }}
-        .reveal .slides {{ height: 100%; }}
-        .reveal .slides section {{
-          height: 100%;
-          box-sizing: border-box;
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-        }}
+        
+        /* Columns layout */
         .reveal .columns {{
           display: grid;
           grid-template-columns: repeat(var(--cols), 1fr);
           gap: 24px;
           margin-top: 16px;
-          flex: 1 1 auto;
-          min-height: 0;
-          overflow: auto; /* internal scroll when tall */
+          flex: 1;
         }}
-        /* Tighter text for multi-column layouts */
         .reveal .columns[style*="--cols:2"] {{ font-size: clamp(12px, 1.8vw, {max(self.body_font_size_px-2, 12)}px); }}
         .reveal .columns[style*="--cols:3"] {{ font-size: clamp(11px, 1.6vw, {max(self.body_font_size_px-3, 11)}px); }}
-        .reveal .col ul {{ margin: 0; padding-left: 0; list-style: none !important; }}
-        .reveal .col ul li {{ position: relative; padding-left: 18px; margin: 6px 0; }}
-        .reveal .col ul li::marker {{ content: none; }}
-        .reveal .col ul li::before {{ content: '\\2022'; position: absolute; left: 0; top: 0; color: {self.rgb(self.body_color_rgb)}; font-weight: 700; }}
-        /* Ensure no double bullets anywhere */
-        .reveal .content-slide ul {{ margin: 0; padding-left: 0; list-style: none !important; }}
-        .reveal .content-slide li::marker {{ content: none; }}
-        .reveal .content-slide li::before {{ content: '\\2022'; position: absolute; left: 0; top: 0; color: {self.rgb(self.body_color_rgb)}; font-weight: 700; }}
-        .reveal .custom-content ul {{ margin: 0; padding-left: 0; list-style: none !important; }}
-        .reveal .custom-content li {{ position: relative; padding-left: 18px; margin: 6px 0; }}
-        .reveal .custom-content li::marker {{ content: none; }}
-        .reveal .custom-content li::before {{ content: '\\2022'; position: absolute; left: 0; top: 0; color: {self.rgb(self.body_color_rgb)}; font-weight: 700; }}
-        /* Optional spacing tweaks */
-        .reveal section {{ padding: 16px 24px; }}
-        /* Title slide layout */
+        
+        /* Bullet points */
+        .reveal ul {{ margin: 0; padding-left: 0; list-style: none; }}
+        .reveal li {{ position: relative; padding-left: 18px; margin: 6px 0; }}
+        .reveal li::before {{ content: '\\2022'; position: absolute; left: 0; top: 0; color: {self.rgb(self.body_color_rgb)}; font-weight: 700; }}
+        /* Title bar styling */
+        .reveal .title-bar {{
+          width: 120px;
+          height: 6px;
+          background: {self.rgb(self.title_bar_rgb)};
+          margin: 8px 0 12px 0;
+        }}
+        
+        /* Title slide */
         .reveal .title-slide {{
           display: flex;
           flex-direction: column;
           align-items: flex-start;
           justify-content: flex-start;
-          margin-top: 25vh; /* 1/4 down the slide */
+          margin-top: 25vh;
           text-align: left;
-        }}
-        .reveal .title-slide .title-bar {{
-          width: 120px;
-          height: 6px;
-          background: {self.rgb(self.title_bar_rgb)};
-          margin-bottom: 12px;
         }}
         .reveal .title-slide h1.title {{
           font-family: {self.title_font_family};
           font-weight: 700;
-          font-size: 40px; /* override requested */
+          font-size: 40px;
           color: {self.rgb((0,0,0))};
           margin: 0 0 8px 0;
         }}
         .reveal .title-slide .subtitle {{
           font-family: {self.subtitle_font_family};
           font-weight: 400;
-          font-size: 24px; /* override requested */
-          color: {self.rgb((102, 163, 255))}; /* light blue */
+          font-size: 24px;
+          color: {self.rgb((102, 163, 255))};
         }}
-        /* Agenda slide layout */
+        
+        /* Agenda slide */
         .reveal .agenda-slide {{
           margin-top: 10vh;
           text-align: left;
-        }}
-        .reveal .agenda-slide h2.title {{
-          font-family: {self.title_font_family};
-          font-weight: 700;
         }}
         .reveal .agenda-columns {{
           display: grid;
@@ -297,19 +322,6 @@ class SlideTheme:
           gap: 24px;
           align-items: start;
         }}
-        .reveal .agenda-list {{
-          list-style: none;
-          padding-left: 0;
-          margin: 8px 0 0 0;
-        }}
-        /* Agenda title underline bar (same as title-slide length/color) */
-        .reveal .agenda-slide .title-bar {{
-          width: 120px;
-          height: 6px;
-          background: {self.rgb(self.title_bar_rgb)};
-          margin: 8px 0 12px 0;
-        }}
-        /* Adaptive sizes */
         .reveal .agenda-size-large {{ font-size: 28px; }}
         .reveal .agenda-size-medium {{ font-size: 22px; }}
         .reveal .agenda-size-small {{ font-size: 18px; }}
@@ -317,41 +329,27 @@ class SlideTheme:
           display: flex;
           align-items: flex-start;
           gap: 12px;
-          margin: 14px 0; /* increased spacing between agenda points */
+          margin: 14px 0;
         }}
         .reveal .agenda-num {{
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 1.8em; /* scale with text size */
-          height: 1.8em; /* scale with text size */
+          width: 1.8em;
+          height: 1.8em;
           border-radius: 50%;
           background: {self.rgb(self.title_bar_rgb)};
           color: #ffffff;
           font-weight: 700;
-          font-size: 0.9em; /* number size relative to text */
+          font-size: 0.9em;
           line-height: 1.8em;
           flex: 0 0 1.8em;
         }}
-        /* Content slide layout: allow Reveal to scale content to fit */
+        
+        /* Content slide */
         .reveal .content-slide {{
           text-align: left;
-          display: flex;
-          flex-direction: column;
-          flex: 1 1 auto;        /* allow main content to fill available height */
-          min-height: 0;          /* enable children to scroll instead of overflowing */
-          overflow: auto;         /* internal scroll if total content exceeds slide */
-          padding-bottom: 40px;   /* keep space above footer/logo */
-        }}
-        .reveal .content-slide h2.title {{
-          font-family: {self.title_font_family};
-          font-weight: 700;
-        }}
-        .reveal .content-slide .title-bar {{
-          width: 120px;
-          height: 6px;
-          background: {self.rgb(self.title_bar_rgb)};
-          margin: 8px 0 12px 0;
+          flex: 1;
         }}
         .reveal .content-slide .subtitle {{
           font-family: {self.subtitle_font_family};
@@ -361,46 +359,32 @@ class SlideTheme:
           margin-bottom: 8px;
         }}
         .reveal .columns.with-dividers .col {{
-          border-right: 2px solid rgba(102, 163, 255, 0.25); /* faint blue */
-          padding-right: 16px;
+          border-right: 2px solid rgba(102, 163, 255, 0.25);
         }}
         .reveal .columns.with-dividers .col:last-child {{
           border-right: none;
-          padding-right: 0;
         }}
-        /* Custom slide content styling (for visualisations) */
+        /* Custom content styling */
         .reveal .custom-content {{
           margin-top: 16px;
           line-height: 1.6;
-          flex: 1 1 auto;       /* allow custom area to take remaining height */
-          min-height: 0;         /* enable child overflow scrolling */
-          overflow: auto;        /* internal scroll if visual is tall */
-          max-height: calc(100% - 120px); /* reserve space for title/subtitle/chrome */
+          flex: 1;
+          font-size: clamp(11px, 1.3vw, {max(self.body_font_size_px-2, 14)}px);
         }}
         .reveal .custom-content img,
         .reveal .custom-content svg,
         .reveal .custom-content canvas {{
-          width: 100% !important;   /* scale to container width */
-          height: auto !important;  /* preserve aspect ratio */
+          width: 100%;
+          height: auto;
           max-height: 100%;
           display: block;
           margin: 0 auto;
           object-fit: contain;
         }}
-        /* Fit user-provided full-slide HTML (e.g., .slide-container) to the viewer */
-        .reveal .custom-content .slide-container {{ width: 100% !important; max-width: 100% !important; }}
-        .reveal .custom-content .content-container {{ padding-left: clamp(40px, 6vw, 100px); padding-right: clamp(40px, 6vw, 100px); }}
-        /* Clamp SVG/D3 text sizes inside visuals to avoid overflow */
-        .reveal .custom-content svg text {{
-          font-size: clamp(10px, 1.6vw, {max(self.body_font_size_px-2, 12)}px);
-        }}
-        /* Normalize inline font sizes and heading scales inside custom HTML */
-        .reveal .custom-content {{
-          font-size: clamp(11px, 1.3vw, {max(self.body_font_size_px-2, 14)}px);
-        }}
-        .reveal .custom-content *[style*="font-size"] {{
-          font-size: inherit !important;
-        }}
+        .reveal .custom-content .slide-container {{ width: 100%; }}
+        .reveal .custom-content .content-container {{ padding: 0; }}
+        
+        /* Custom content headings */
         .reveal .custom-content h1 {{
           font-size: clamp(20px, 3vw, {max(self.title_font_size_px-8, 24)}px);
           line-height: 1.2;
@@ -425,49 +409,32 @@ class SlideTheme:
           margin: 0 0 6px 0;
           font-weight: 600;
         }}
-        .reveal .custom-content *,
-        .reveal .custom-content *::before,
-        .reveal .custom-content *::after {{
-          box-sizing: border-box;
-          max-width: 100% !important;
+        
+        /* SVG/D3 text sizing */
+        .reveal .custom-content svg text {{
+          font-size: clamp(10px, 1.6vw, {max(self.body_font_size_px-2, 12)}px);
         }}
-        /* Cap excessive inline spacings coming from LLM HTML */
-        .reveal .custom-content [style*="padding"] {{
-          padding: min(16px, 2vw) !important;
+        /* Navigation controls */
+        .reveal .controls {{ display: none; }}
+        .reveal .slide-number {{
+          position: fixed;
+          bottom: 20px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: rgba(37, 99, 235, 0.9);
+          color: white;
+          padding: 6px 12px;
+          border-radius: 16px;
+          font-weight: 500;
+          font-size: 14px;
+          z-index: 1000;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+          display: none;
         }}
-        .reveal .custom-content [style*="margin-bottom"] {{
-          margin-bottom: min(12px, 1.8vw) !important;
-        }}
-        .reveal .custom-content [style*="gap"] {{
-          gap: min(12px, 1.6vw) !important;
-        }}
-        .reveal .columns img,
-        .reveal .columns svg,
-        .reveal .columns canvas {{
-          max-width: 100%;
-          height: auto;
-          max-height: 100%;
-          display: block;
-          margin: 0 auto;
-          object-fit: contain;
-        }}
-        /* Optional brand chrome */
-        .brand-header {{
-          position: absolute; left: 0; top: 0; right: 0;
-          height: {self.header_bar_height_px}px;
-          background: {self.rgb(self.primary_rgb)};
-          z-index: 5;
-        }}
-        .brand-header .logo {{
-          position: absolute; top: {self.header_bar_height_px + 8}px; left: 24px;
-          max-height: 36px; width: auto;
-        }}
-        .brand-footer {{
-          position: absolute; left: 24px; right: 24px; bottom: 12px;
-          color: {self.rgb(self.subtitle_color_rgb)}; font-size: 12px;
-          display: flex; align-items: center; justify-content: space-between;
-        }}
-        /* Bottom-right logo styling */
+        .reveal.has-real-slides .slide-number {{ display: block; }}
+        .reveal.focused {{ outline: none; }}
+        
+        /* Bottom-right EY Parthenon logo */
         .bottom-right-logo {{
           position: fixed;
           bottom: {self.bottom_right_logo_margin_px}px;
@@ -476,67 +443,7 @@ class SlideTheme:
           width: auto;
           z-index: 1000;
           opacity: 0.9;
-          display: block; /* Always show when included */
-        }}
-        
-        
-        /* Hide navigation controls - focus on keyboard navigation */
-        .reveal .controls {{
-          display: none !important;
-        }}
-        
-        /* Center and style the slide number - but only show when we have real slides */
-        .reveal .slide-number {{
-          position: fixed !important;
-          bottom: 20px !important;
-          left: 50% !important;
-          transform: translateX(-50%) !important;
-          right: auto !important;
-          background: rgba(37, 99, 235, 0.9) !important;
-          color: white !important;
-          padding: 6px 12px !important;
-          border-radius: 16px !important;
-          font-weight: 500 !important;
-          font-size: 14px !important;
-          z-index: 1000 !important;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
-          display: none !important; /* Hidden by default */
-        }}
-        
-        /* Only show slide number when we have valid content and it's properly formatted */
-        .reveal.has-real-slides .slide-number {{
-          display: block !important;
-        }}
-        
-        /* Hide slide number in all error cases */
-        .reveal .slide-number:empty,
-        .reveal .slide-number[data-total="0"],
-        .reveal:not(.has-slides) .slide-number {{
-          display: none !important;
-        }}
-        
-        /* Hide if it contains invalid text */
-        .reveal .slide-number:contains('NaN'),
-        .reveal .slide-number:contains('undefined') {{
-          display: none !important;
-        }}
-        
-        /* Ensure keyboard navigation works */
-        .reveal.focused {{
-          outline: none;
-        }}
-        
-        /* Message about keyboard navigation */
-        .reveal .navigation-hint {{
-          position: fixed;
-          top: 20px;
-          right: 20px;
-          background: rgba(0, 0, 0, 0.8);
-          color: white;
-          padding: 8px 12px;
-          border-radius: 6px;
-          font-size: 12px;
-          z-index: 1001;
+          display: block;
         }}
         """
     

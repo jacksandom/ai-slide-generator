@@ -24,7 +24,7 @@ from databricks.sdk import WorkspaceClient
 
 # Initialize Databricks client and components
 # Use explicit profile so local dev can auth with the intended workspace
-ws = WorkspaceClient(profile='e2-demo-field-eng-aws', product='slide-generator')
+ws = WorkspaceClient(profile='e2-demo', product='slide-generator')
 
 def get_logo_base64():
     """Load the EY-Parthenon logo and encode it as base64 for embedding in HTML."""
@@ -77,7 +77,7 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-title-slide\">
       <style>
         .demo-title-slide { font-family: Arial, sans-serif; color: #2E2E38; }
-        .demo-title-slide .slide-container { width: 1280px; min-height: 720px; position: relative; overflow: hidden; background: #FFFFFF; }
+        .demo-title-slide .slide-container { width: 1280px; height: 720px; position: relative; overflow: hidden; background: #FFFFFF; }
         .demo-title-slide .accent-blue { color: #1A9AFA; }
         .demo-title-slide .accent-line { background-color: #1A9AFA; height: 6px; width: 100px; }
         .demo-title-slide .logo-container { position: absolute; bottom: 40px; right: 40px; width: 180px; }
@@ -129,11 +129,11 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-toc-slide\">
       <style>
         .demo-toc-slide { font-family: Arial, sans-serif; color: #2E2E38; }
-        .demo-toc-slide .slide-container { width: 1280px; min-height: 720px; position: relative; overflow: hidden; background: #FFFFFF; }
+        .demo-toc-slide .slide-container { width: 1280px; height: 720px; position: relative; overflow: hidden; background: #FFFFFF; }
         .demo-toc-slide .accent-line { background-color: #1A9AFA; height: 4px; width: 80px; }
-        .demo-toc-slide .toc-container { padding-left: 80px; padding-right: 80px; margin-top: 64px; }
-        .demo-toc-slide .grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 32px; row-gap: 16px; }
-        .demo-toc-slide .toc-item { display: flex; align-items: center; margin-bottom: 12px; flex-wrap: nowrap; }
+        .demo-toc-slide .toc-container { padding-left: 80px; padding-right: 80px; margin-top: 40px; }
+        .demo-toc-slide .grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 32px; row-gap: 8px; }
+        .demo-toc-slide .toc-item { display: flex; align-items: center; margin-bottom: 8px; flex-wrap: nowrap; }
         .demo-toc-slide .toc-number { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background-color: #1A9AFA; color: #fff; font-weight: 700; margin-right: 14px; flex: 0 0 auto; }
         .demo-toc-slide .toc-text { font-size: 17px; white-space: nowrap; flex: 1 1 auto; overflow: visible; }
         .demo-toc-slide .text-4xl { font-size: 32px; line-height: 1.25; }
@@ -149,15 +149,15 @@ DEMO_SLIDES: List[str] = [
         .demo-toc-slide .bottom-0 { bottom: 0; }
         .demo-toc-slide .w-12 { width: 48px; }
         .demo-toc-slide .relative { position: relative; }
-        .demo-toc-slide .h-12 { height: 48px; }
+        .demo-toc-slide .h-12 { height: 32px; }
       </style>
       <div class=\"slide-container\">
         <div class=\"w-full h-2\"></div>
         <div class=\"absolute left-0 top-0 bottom-0 w-12\"></div>
         <div class=\"toc-container\">
-          <div class=\"mb-6\">
+          <div class=\"mb-4\">
             <h1 class=\"text-4xl font-bold mb-2\">Table of Contents</h1>
-            <div class=\"accent-line mb-8\"></div>
+            <div class=\"accent-line mb-4\"></div>
           </div>
           <div class=\"grid\">
             <div class=\"toc-item\"><div class=\"toc-number\">1</div><span class=\"toc-text\">Executive Summary</span></div>
@@ -185,7 +185,7 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-overview-slide\">
       <style>
         .demo-overview-slide { font-family: Arial, sans-serif; color: #2E2E38; }
-        .demo-overview-slide .slide-container { width: 1280px; min-height: 720px; position: relative; overflow: hidden; background: #FFFFFF; }
+        .demo-overview-slide .slide-container { width: 1280px; height: 720px; position: relative; overflow: hidden; background: #FFFFFF; }
         .demo-overview-slide .accent-line { background-color: #1A9AFA; height: 4px; width: 80px; }
         .demo-overview-slide .content-container { padding-left: 100px; padding-right: 100px; margin-top: 64px; }
         .demo-overview-slide .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
@@ -250,9 +250,9 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-value-slide\">
       <style>
         .demo-value-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-value-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-value-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-value-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-value-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-value-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
         .demo-value-slide .grid{display:grid;grid-template-columns:1fr 1fr;gap:32px}
         .demo-value-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-value-slide .text-2xl{font-size:24px}
@@ -314,9 +314,9 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-market-slide\">
       <style>
         .demo-market-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-market-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-market-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-market-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-market-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-market-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
         .demo-market-slide .grid{display:grid;grid-template-columns:1fr 1fr;gap:32px}
         .demo-market-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-market-slide .text-2xl{font-size:24px}
@@ -370,9 +370,9 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-segment-slide\">
       <style>
         .demo-segment-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-segment-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-segment-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-segment-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-segment-slide .content-container{padding-left:100px;padding-right:100px;margin-top:48px;margin-bottom:24px}
+        .demo-segment-slide .content-container{padding-left:0;padding-right:0;margin-top:48px;margin-bottom:24px}
         .demo-segment-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:12px}
         .demo-segment-slide .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:8px}
         .demo-segment-slide .text-4xl{font-size:32px;line-height:1.25}
@@ -463,9 +463,9 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-competitors-slide\">
       <style>
         .demo-competitors-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-competitors-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-competitors-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-competitors-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-competitors-slide .content-container{padding-left:100px;padding-right:100px;margin-top:48px;margin-bottom:24px}
+        .demo-competitors-slide .content-container{padding-left:0;padding-right:0;margin-top:32px;margin-bottom:12px}
         .demo-competitors-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-competitors-slide .text-2xl{font-size:24px}
         .demo-competitors-slide .font-bold{font-weight:700}
@@ -478,15 +478,15 @@ DEMO_SLIDES: List[str] = [
         .demo-competitors-slide .coverage-moderate{color:#3DB5FF}
         .demo-competitors-slide .coverage-limited{color:#B4E2FF}
         .demo-competitors-slide .placeholder{height:250px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
-        .demo-competitors-slide .chart-container{height:250px;position:relative}
+        .demo-competitors-slide .chart-container{height:200px;position:relative}
       </style>
       <div class=\"slide-container\">
         <div class=\"content-container\">
-          <div class=\"mb-6\">
+          <div class=\"mb-4\">
             <h1 class=\"text-4xl font-bold mb-2\">Segments Served vs. Competitors</h1>
-            <div class=\"accent-line mb-6\"></div>
+            <div class=\"accent-line mb-4\"></div>
           </div>
-          <div class=\"mb-6\">
+          <div class=\"mb-4\">
             <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Competitive Positioning by Market Segment</h2>
             <table class=\"data-table\">
               <thead>
@@ -502,7 +502,7 @@ DEMO_SLIDES: List[str] = [
             </table>
           </div>
           <div>
-            <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Regional Market Strength</h2>
+            <h2 class=\"text-2xl font-semibold accent-blue mb-3\">Regional Market Strength</h2>
             <div class=\"chart-container\"><canvas id=\"seg_strength_radar\"></canvas></div>
             <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:8px\">Source: Market share data, annual reports, EY‑Parthenon analysis</div>
           </div>
@@ -542,9 +542,9 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-growth-slide\">
       <style>
         .demo-growth-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-growth-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-growth-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-growth-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-growth-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-growth-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
         .demo-growth-slide .grid{display:grid;grid-template-columns:1fr 1fr;gap:32px}
         .demo-growth-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-growth-slide .text-2xl{font-size:24px}
@@ -589,9 +589,9 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-financial-slide\">
       <style>
         .demo-financial-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-financial-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-financial-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-financial-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-financial-slide .content-container{padding-left:100px;padding-right:100px;margin-top:48px;margin-bottom:24px}
+        .demo-financial-slide .content-container{padding-left:0;padding-right:0;margin-top:48px;margin-bottom:24px}
         .demo-financial-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-financial-slide .text-xl{font-size:20px}
         .demo-financial-slide .font-bold{font-weight:700}
@@ -697,9 +697,9 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-competitive-slide\">
       <style>
         .demo-competitive-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-competitive-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-competitive-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-competitive-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-competitive-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-competitive-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
         .demo-competitive-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-competitive-slide .text-2xl{font-size:24px}
         .demo-competitive-slide .text-xl{font-size:20px}
@@ -753,24 +753,24 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-exec-slide\">
       <style>
         .demo-exec-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-exec-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-exec-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-exec-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-exec-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-exec-slide .content-container{padding-left:0;padding-right:0;margin-top:40px}
         .demo-exec-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-exec-slide .text-2xl{font-size:24px}
         .demo-exec-slide .font-bold{font-weight:700}
         .demo-exec-slide .font-semibold{font-weight:600}
         .demo-exec-slide .accent-blue{color:#1A9AFA}
-        .demo-exec-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:32px}
-        .demo-exec-slide .bullet-point{display:flex;margin-bottom:14px}
-        .demo-exec-slide .bullet-icon{color:#1A9AFA;margin-right:12px;flex-shrink:0;margin-top:4px}
+        .demo-exec-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+        .demo-exec-slide .bullet-point{display:flex;margin-bottom:10px}
+        .demo-exec-slide .bullet-icon{color:#1A9AFA;margin-right:8px;flex-shrink:0;margin-top:4px}
         .demo-exec-slide .highlight-box{background:#F5F5F7;border-left:4px solid #1A9AFA;padding:15px;margin:10px 0}
       </style>
       <div class=\"slide-container\">
         <div class=\"content-container\">
-          <div class=\"mb-6\">
+          <div class=\"mb-4\">
             <h1 class=\"text-4xl font-bold mb-2\">Executive Summary</h1>
-            <div class=\"accent-line mb-8\"></div>
+            <div class=\"accent-line mb-4\"></div>
           </div>
           <div class=\"grid2\">
             <div>
@@ -779,7 +779,7 @@ DEMO_SLIDES: List[str] = [
               <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Market Leadership:</b> Leaders in Vietnam, Brazil, Mexico; expanding in India</div></div>
               <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Innovation Pipeline:</b> LONO leadership (Heineken® 0.0) and beyond‑beer expansion</div></div>
               <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Financial Strength:</b> 15.1% Op margin, €3.06B FCF (+73.8%), productivity gains</div></div>
-              <h2 class=\"text-2xl font-semibold accent-blue mb-4\" style=\"margin-top:24px\">Market Assessment</h2>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-3\" style=\"margin-top:16px\">Market Assessment</h2>
               <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Global Market:</b> ~€839B (2024), 2–4% CAGR to 2030, premium‑led growth</div></div>
               <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Regional:</b> APAC (6–8%) &amp; Africa (5–7%) offset mature Europe (1–2%)</div></div>
               <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Category:</b> Premium 4.5% CAGR, Craft 9%, LONO 8% vs mainstream 1.2%</div></div>
@@ -792,7 +792,7 @@ DEMO_SLIDES: List[str] = [
               <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Opportunity – LONO:</b> Scale leadership position as growth accelerates</div></div>
               <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Opportunity – Digital:</b> eB2B scaling (€13B GMV, 670k+ customers)</div></div>
               <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><b>Opportunity – APAC:</b> Premiumization in Vietnam, China, India</div></div>
-              <div class=\"highlight-box\" style=\"margin-top:24px\">
+              <div class=\"highlight-box\" style=\"margin-top:16px\">
                 <h3 class=\"font-bold\" style=\"margin-bottom:6px\">Commercial Assessment</h3>
                 <p style=\"margin-bottom:8px\">Well‑positioned for sustained growth via premium portfolio, innovation, and EM footprint; EverGreen strategy aligns to market trends while lifting efficiency.</p>
                 <p class=\"font-semibold\">5‑Year Base Case: ~4% CAGR; margin expansion potential via digitalization and productivity.</p>
@@ -800,7 +800,7 @@ DEMO_SLIDES: List[str] = [
             </div>
           </div>
         </div>
-        <div class=\"w-full\" style=\"height:48px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
+        <div class=\"w-full\" style=\"height:32px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
       </div>
     </div>
     """
@@ -809,9 +809,9 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-benchmark-slide\">
       <style>
         .demo-benchmark-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-benchmark-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-benchmark-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-benchmark-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-benchmark-slide .content-container{padding-left:100px;padding-right:100px;margin-top:48px;margin-bottom:24px}
+        .demo-benchmark-slide .content-container{padding-left:0;padding-right:0;margin-top:48px;margin-bottom:24px}
         .demo-benchmark-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-benchmark-slide .text-2xl{font-size:24px}
         .demo-benchmark-slide .font-bold{font-weight:700}
@@ -899,9 +899,9 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-competitive-position-slide\">
       <style>
         .demo-competitive-position-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-competitive-position-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-competitive-position-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-competitive-position-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-competitive-position-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-competitive-position-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
         .demo-competitive-position-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-competitive-position-slide .text-2xl{font-size:24px}
         .demo-competitive-position-slide .font-bold{font-weight:700}
@@ -955,9 +955,9 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-opportunities-threats-slide\">
       <style>
         .demo-opportunities-threats-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-opportunities-threats-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-opportunities-threats-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-opportunities-threats-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-opportunities-threats-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-opportunities-threats-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
         .demo-opportunities-threats-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-opportunities-threats-slide .text-2xl{font-size:24px}
         .demo-opportunities-threats-slide .font-bold{font-weight:700}
@@ -1005,9 +1005,9 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-5yr-forecast-slide\">
       <style>
         .demo-5yr-forecast-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-5yr-forecast-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-5yr-forecast-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-5yr-forecast-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-5yr-forecast-slide .content-container{padding-left:100px;padding-right:100px}
+        .demo-5yr-forecast-slide .content-container{padding-left:0;padding-right:0}
         .demo-5yr-forecast-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-5yr-forecast-slide .text-2xl{font-size:24px}
         .demo-5yr-forecast-slide .font-bold{font-weight:700}
@@ -1105,9 +1105,9 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-scenarios-slide\">
       <style>
         .demo-scenarios-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-scenarios-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-scenarios-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-scenarios-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-scenarios-slide .content-container{padding-left:100px;padding-right:100px;margin-top:48px;margin-bottom:24px}
+        .demo-scenarios-slide .content-container{padding-left:0;padding-right:0;margin-top:48px;margin-bottom:24px}
         .demo-scenarios-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-scenarios-slide .font-bold{font-weight:700}
         .demo-scenarios-slide .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px}
@@ -1213,9 +1213,9 @@ DEMO_SLIDES: List[str] = [
     <div class=\"demo-conclusion-slide\">
       <style>
         .demo-conclusion-slide{font-family:Arial,sans-serif;color:#2E2E38}
-        .demo-conclusion-slide .slide-container{width:1280px;min-height:720px;position:relative;overflow:hidden;background:#FFFFFF}
+        .demo-conclusion-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-conclusion-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-conclusion-slide .content-container{padding-left:100px;padding-right:100px;margin-top:64px}
+        .demo-conclusion-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
         .demo-conclusion-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-conclusion-slide .text-2xl{font-size:24px}
         .demo-conclusion-slide .font-bold{font-weight:700}
@@ -1321,9 +1321,9 @@ def _build_toc_html_from_deck(deck: html_slides.HtmlDeck) -> str:
     <div class=\"slide-container bg-white flex flex-col\">
       <style>
         body {{ margin:0; padding:0; background:#FFFFFF; color:#2E2E38; font-family: Arial, sans-serif; }}
-        .slide-container {{ width:1280px; min-height:720px; position:relative; overflow:hidden; }}
+        .slide-container {{ width:1280px; height:720px; position:relative; overflow:hidden; }}
         .accent-line {{ background-color:#1A9AFA; height:4px; width:80px; }}
-        .toc-container {{ padding-left:100px; padding-right:100px; }}
+        .toc-container {{ padding-left:0; padding-right:0; }}
         .toc-item {{ display:flex; align-items:center; margin-bottom:12px; }}
         .toc-number {{ width:32px; height:32px; display:flex; align-items:center; justify-content:center; border-radius:50%; background-color:#1A9AFA; color:#fff; font-weight:bold; margin-right:16px; }}
         .toc-text {{ font-size:18px; }}

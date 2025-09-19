@@ -23,13 +23,13 @@ const SlideArea = styled.div`
 `;
 
 const SlideListPanel = styled.div`
-  width: 300px;
-  min-width: 280px;
-  max-width: 340px;
+  width: 200px;
+  min-width: 180px;
+  max-width: 220px;
   background: #FFFFFF;
   border: 1px solid #e5e7eb;
   border-radius: 16px;
-  padding: 12px;
+  padding: 8px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -40,7 +40,7 @@ const SlideList = styled.div`
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 `;
 
 const SlideListItem = styled.button<{ $active?: boolean }>`
@@ -48,14 +48,14 @@ const SlideListItem = styled.button<{ $active?: boolean }>`
   border: 1px solid ${props => (props.$active ? '#1A9AFA' : '#e5e7eb')};
   background: ${props => (props.$active ? 'rgba(26, 154, 250, 0.06)' : '#fafafa')};
   color: #111827;
-  border-radius: 12px;
-  padding: 10px 10px 12px 10px;
+  border-radius: 8px;
+  padding: 6px 6px 8px 6px;
   cursor: pointer;
   transition: background-color .15s, border-color .15s;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 8px;
+  gap: 4px;
   &:hover { background: #f3f4f6; }
 `;
 
@@ -63,23 +63,23 @@ const SlideIndex = styled.span`
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  font-size: 12px;
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
   font-weight: 600;
   color: #1F2937;
   background: #E5E7EB;
-  border-radius: 6px;
+  border-radius: 4px;
 `;
 
 const SlideTitleRow = styled.div`
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 `;
 
 const SlideTitle = styled.div`
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -87,9 +87,9 @@ const SlideTitle = styled.div`
 `;
 
 const ThumbBox = styled.div`
-  width: 200px;
-  height: 112px; /* 16:9 */
-  border-radius: 8px;
+  width: 120px;
+  height: 68px; /* 16:9 */
+  border-radius: 6px;
   overflow: hidden;
   background: #ffffff;
   border: 1px solid #e5e7eb;
@@ -100,7 +100,7 @@ const ThumbFrame = styled.iframe`
   width: 800px;   /* virtual size before scale */
   height: 450px;  /* 16:9 */
   border: 0;
-  transform: scale(0.25); /* 800*0.25=200px, 450*0.25=112.5px */
+  transform: scale(0.15); /* 800*0.15=120px, 450*0.15=67.5px */
   transform-origin: top left;
   pointer-events: none; /* preview only */
   background: white;
@@ -111,16 +111,15 @@ const SlideDisplay = styled.div`
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 20px;
-  margin-bottom: 20px;
+  padding: 16px;
+  margin-bottom: 16px;
   position: relative;
   min-height: 0;
 `;
 
 const SlideFrame = styled.div`
-  width: 96%;
-  max-width: 98%;
-  max-height: 90%;
+  width: 98%;
+  max-width: 99%;
   aspect-ratio: 16/9;
   border: 2px solid #d1d5db;
   border-radius: 12px;
@@ -130,26 +129,28 @@ const SlideFrame = styled.div`
   position: relative;
   
   @media (min-width: 1200px) {
-    width: 97%;
-    max-height: 92%;
+    width: 99%;
   }
   
   @media (min-width: 1600px) {
-    width: 98%;
-    max-height: 94%;
+    width: 99%;
   }
   
   @media (max-width: 768px) {
-    width: 95%;
-    max-height: 88%;
+    width: 97%;
   }
 `;
 
 const IFrame = styled.iframe`
-  width: 100%;
-  height: 100%;
+  width: 1280px;
+  height: 720px;
   border: none;
   background: white;
+  transform: scale(var(--scale-factor, 1));
+  transform-origin: top left;
+  position: absolute;
+  top: 0;
+  left: 0;
 `;
 
 
@@ -200,7 +201,23 @@ const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
   const hasSlides = html && html.trim().length > 0;
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const slideFrameRef = useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+
+  const calculateScaleFactor = () => {
+    if (!slideFrameRef.current || !iframeRef.current) return;
+    
+    const frameRect = slideFrameRef.current.getBoundingClientRect();
+    // Use full frame dimensions for maximum content visibility
+    const availableWidth = frameRect.width;
+    const availableHeight = frameRect.height;
+    
+    const scaleX = availableWidth / 1280;
+    const scaleY = availableHeight / 720;
+    const scale = Math.min(scaleX, scaleY);
+    
+    iframeRef.current.style.setProperty('--scale-factor', scale.toString());
+  };
 
   const slidesMeta = useMemo(() => {
     if (!hasSlides) return [] as { index: number; title: string }[];
@@ -229,6 +246,20 @@ const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, [activeIndex]);
+
+  // Calculate scale factor when component mounts or resizes
+  useEffect(() => {
+    if (!hasSlides) return;
+    
+    const handleResize = () => {
+      setTimeout(calculateScaleFactor, 100);
+    };
+    
+    calculateScaleFactor();
+    window.addEventListener('resize', handleResize);
+    
+    return () => window.removeEventListener('resize', handleResize);
+  }, [hasSlides, html]);
 
   const gotoSlide = (index: number) => {
     setActiveIndex(index);
@@ -286,7 +317,7 @@ const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
             </SlideList>
           </SlideListPanel>
           <SlideDisplay>
-            <SlideFrame>
+            <SlideFrame ref={slideFrameRef}>
               {isRefreshing && (
                 <LoadingOverlay>🔄 Refreshing slides...</LoadingOverlay>
               )}
@@ -300,6 +331,8 @@ const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
                   try {
                     iframeRef.current?.contentWindow?.postMessage({ type: 'NAVIGATE_TO', index: activeIndex }, '*');
                   } catch {}
+                  // Calculate scale after iframe loads
+                  setTimeout(calculateScaleFactor, 100);
                 }}
               />
             </SlideFrame>

@@ -478,7 +478,7 @@ DEMO_SLIDES: List[str] = [
         .demo-competitors-slide .coverage-moderate{color:#3DB5FF}
         .demo-competitors-slide .coverage-limited{color:#B4E2FF}
         .demo-competitors-slide .placeholder{height:250px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
-        .demo-competitors-slide .chart-container{height:200px;position:relative}
+        .demo-competitors-slide .chart-container{height:140px;position:relative}
       </style>
       <div class=\"slide-container\">
         <div class=\"content-container\">
@@ -504,9 +504,12 @@ DEMO_SLIDES: List[str] = [
           <div>
             <h2 class=\"text-2xl font-semibold accent-blue mb-3\">Regional Market Strength</h2>
             <div class=\"chart-container\"><canvas id=\"seg_strength_radar\"></canvas></div>
-            <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:8px\">Source: Market share data, annual reports, EY‑Parthenon analysis</div>
+            <div style=\"display:flex;justify-content:space-between;align-items:center;margin-top:4px\">
+              <div style=\"font-size:12px;color:#6b7280\">Source: Market share data, annual reports, EY‑Parthenon analysis</div>
+              <div id=\"chart-legend\" style=\"font-size:10px;color:#6b7280\"></div>
+            </div>
           </div>
-          <div style=\"margin-top:12px;font-size:14px\"><b>Key Insight:</b> Heineken leads in premium and LONO across Europe and Africa; AB InBev dominates in the Americas; Carlsberg is strong in Asia.</div>
+          <div style=\"margin-top:8px;font-size:14px\"><b>Key Insight:</b> Heineken leads in premium and LONO across Europe and Africa; AB InBev dominates in the Americas; Carlsberg is strong in Asia.</div>
         </div>
         <div class=\"w-full\" style=\"height:48px; position:relative;\"><div style=\"position:absolute;left:0;bottom:0;height:8px;width:33%;background:#1A9AFA;\"></div></div>
         <script>
@@ -528,7 +531,19 @@ DEMO_SLIDES: List[str] = [
                   responsive: true,
                   maintainAspectRatio: false,
                   scales: { r: { suggestedMin: 0, suggestedMax: 10, grid: { color:'#e5e7eb' }, angleLines: { color:'#e5e7eb' }, ticks: { display:false } } },
-                  plugins: { legend: { position:'bottom', labels: { boxWidth:12, padding:10, font:{ size:11 } } } }
+                  plugins: { legend: { display: false } },
+                  onComplete: function() {
+                    const legendContainer = document.getElementById('chart-legend');
+                    if (legendContainer) {
+                      const datasets = this.data.datasets;
+                      const legendItems = datasets.map((dataset, index) => {
+                        const color = dataset.borderColor;
+                        const label = dataset.label;
+                        return `<span style=\"color:${color};margin-right:8px\">●</span>${label}`;
+                      }).join(' ');
+                      legendContainer.innerHTML = legendItems;
+                    }
+                  }
                 }
               });
             }
@@ -591,48 +606,48 @@ DEMO_SLIDES: List[str] = [
         .demo-financial-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-financial-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-financial-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-financial-slide .content-container{padding-left:0;padding-right:0}
-        .demo-financial-slide .text-4xl{font-size:32px;line-height:1.25}
-        .demo-financial-slide .text-xl{font-size:20px}
+        .demo-financial-slide .content-container{padding-left:0;padding-right:0;margin-top:0;margin-bottom:0}
+        .demo-financial-slide .text-4xl{font-size:28px;line-height:1.2}
+        .demo-financial-slide .text-xl{font-size:18px}
         .demo-financial-slide .font-bold{font-weight:700}
         .demo-financial-slide .font-semibold{font-weight:600}
         .demo-financial-slide .accent-blue{color:#1A9AFA}
-        .demo-financial-slide .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px}
-        .demo-financial-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:12px}
-        .demo-financial-slide .card{border-left:4px solid #1A9AFA;padding:12px;background:#f5f5f7}
+        .demo-financial-slide .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px}
+        .demo-financial-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:8px}
+        .demo-financial-slide .card{border-left:4px solid #1A9AFA;padding:8px;background:#f5f5f7}
         .demo-financial-slide .pos{color:#10B981}
         .demo-financial-slide .neg{color:#EF4444}
-        .demo-financial-slide .placeholder{height:220px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
-        .demo-financial-slide .chart-container{height:220px;position:relative}
+        .demo-financial-slide .placeholder{height:160px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
+        .demo-financial-slide .chart-container{height:160px;position:relative}
         .demo-financial-slide .data-table{width:100%;border-collapse:collapse}
-        .demo-financial-slide .data-table th{background:#f5f5f7;padding:8px;text-align:left;font-weight:700;border-bottom:2px solid #1A9AFA}
-        .demo-financial-slide .data-table td{padding:8px;border-bottom:1px solid #e5e5e5}
+        .demo-financial-slide .data-table th{background:#f5f5f7;padding:6px;text-align:left;font-weight:700;border-bottom:2px solid #1A9AFA;font-size:12px}
+        .demo-financial-slide .data-table td{padding:6px;border-bottom:1px solid #e5e5e5;font-size:12px}
       </style>
       <div class=\"slide-container\">
         <div class=\"content-container\">
-          <div class=\"mb-6\">
-            <h1 class=\"text-4xl font-bold mb-2\">Financial Performance Overview</h1>
-            <div class=\"accent-line mb-6\"></div>
+          <div class=\"mb-3\">
+            <h1 class=\"text-4xl font-bold mb-1\">Financial Performance Overview</h1>
+            <div class=\"accent-line mb-3\"></div>
           </div>
           <div class=\"grid3\">
-            <div class=\"card\"><h3 class=\"font-bold\">Net Revenue (beia)</h3><div class=\"font-semibold\" style=\"font-size:22px\">€29.96B</div><div class=\"neg\" style=\"font-size:14px\">-1.1% YoY</div><div style=\"font-size:14px;margin-top:4px\">Organic growth: +5.0%</div></div>
-            <div class=\"card\"><h3 class=\"font-bold\">Operating Profit (beia)</h3><div class=\"font-semibold\" style=\"font-size:22px\">€4.51B</div><div class=\"pos\" style=\"font-size:14px\">+1.6% YoY</div><div style=\"font-size:14px;margin-top:4px\">Margin: 15.1% (+40bps)</div></div>
-            <div class=\"card\"><h3 class=\"font-bold\">Net Profit (beia)</h3><div class=\"font-semibold\" style=\"font-size:22px\">€2.74B</div><div class=\"pos\" style=\"font-size:14px\">+4.1% YoY</div><div style=\"font-size:14px;margin-top:4px\">FCF: €3.06B (+73.8%)</div></div>
+            <div class=\"card\"><h3 class=\"font-bold\" style=\"font-size:14px\">Net Revenue (beia)</h3><div class=\"font-semibold\" style=\"font-size:18px\">€29.96B</div><div class=\"neg\" style=\"font-size:12px\">-1.1% YoY</div><div style=\"font-size:12px;margin-top:2px\">Organic growth: +5.0%</div></div>
+            <div class=\"card\"><h3 class=\"font-bold\" style=\"font-size:14px\">Operating Profit (beia)</h3><div class=\"font-semibold\" style=\"font-size:18px\">€4.51B</div><div class=\"pos\" style=\"font-size:12px\">+1.6% YoY</div><div style=\"font-size:12px;margin-top:2px\">Margin: 15.1% (+40bps)</div></div>
+            <div class=\"card\"><h3 class=\"font-bold\" style=\"font-size:14px\">Net Profit (beia)</h3><div class=\"font-semibold\" style=\"font-size:18px\">€2.74B</div><div class=\"pos\" style=\"font-size:12px\">+4.1% YoY</div><div style=\"font-size:12px;margin-top:2px\">FCF: €3.06B (+73.8%)</div></div>
           </div>
           <div class=\"grid2\">
             <div>
-              <h2 class=\"text-xl font-semibold accent-blue mb-3\">Financial Performance (€B)</h2>
+              <h2 class=\"text-xl font-semibold accent-blue mb-2\">Financial Performance (€B)</h2>
               <div class=\"chart-container\"><canvas id=\"fp_bar\"></canvas></div>
-              <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:4px\">Source: Heineken Annual Report 2024</div>
+              <div style=\"font-size:10px;color:#6b7280;text-align:center;margin-top:2px\">Source: Heineken Annual Report 2024</div>
             </div>
             <div>
-              <h2 class=\"text-xl font-semibold accent-blue mb-3\">Revenue by Region (2024)</h2>
+              <h2 class=\"text-xl font-semibold accent-blue mb-2\">Revenue by Region (2024)</h2>
               <div class=\"chart-container\"><canvas id=\"fp_doughnut\"></canvas></div>
-              <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:4px\">Source: Heineken Annual Report 2024</div>
+              <div style=\"font-size:10px;color:#6b7280;text-align:center;margin-top:2px\">Source: Heineken Annual Report 2024</div>
             </div>
           </div>
           <div>
-            <h2 class=\"text-xl font-semibold accent-blue mb-3\">Regional Performance Highlights</h2>
+            <h2 class=\"text-xl font-semibold accent-blue mb-2\">Regional Performance Highlights</h2>
             <table class=\"data-table\">
               <thead>
                 <tr><th style=\"width:25%\">Region</th><th style=\"width:25%\">Revenue Growth</th><th style=\"width:25%\">Op. Profit Margin</th><th style=\"width:25%\">Key Markets</th></tr>
@@ -699,28 +714,28 @@ DEMO_SLIDES: List[str] = [
         .demo-competitive-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-competitive-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-competitive-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-competitive-slide .content-container{padding-left:0;padding-right:0}
-        .demo-competitive-slide .text-4xl{font-size:32px;line-height:1.25}
-        .demo-competitive-slide .text-2xl{font-size:24px}
-        .demo-competitive-slide .text-xl{font-size:20px}
+        .demo-competitive-slide .content-container{padding-left:0;padding-right:0;margin-top:0;margin-bottom:0}
+        .demo-competitive-slide .text-4xl{font-size:28px;line-height:1.2}
+        .demo-competitive-slide .text-2xl{font-size:20px}
+        .demo-competitive-slide .text-xl{font-size:16px}
         .demo-competitive-slide .font-bold{font-weight:700}
         .demo-competitive-slide .font-semibold{font-weight:600}
         .demo-competitive-slide .accent-blue{color:#1A9AFA}
-        .demo-competitive-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:32px}
-        .demo-competitive-slide .comp-card{border-left:3px solid #1A9AFA;padding-left:15px;margin-bottom:16px}
-        .demo-competitive-slide .bar-row{display:flex;align-items:center;margin-bottom:8px}
-        .demo-competitive-slide .bar-label{width:25%;font-weight:600}
+        .demo-competitive-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+        .demo-competitive-slide .comp-card{border-left:3px solid #1A9AFA;padding-left:12px;margin-bottom:10px}
+        .demo-competitive-slide .bar-row{display:flex;align-items:center;margin-bottom:6px}
+        .demo-competitive-slide .bar-label{width:25%;font-weight:600;font-size:14px}
         .demo-competitive-slide .bar-wrap{width:75%}
-        .demo-competitive-slide .bar{height:24px;background:#1A9AFA;border-radius:4px;display:flex;align-items:center;justify-content:flex-end;padding-right:10px;color:#fff;font-weight:700}
+        .demo-competitive-slide .bar{height:20px;background:#1A9AFA;border-radius:4px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;color:#fff;font-weight:700;font-size:12px}
       </style>
       <div class=\"slide-container\">
         <div class=\"content-container\">
-          <div class=\"mb-6\">
-            <h1 class=\"text-4xl font-bold mb-2\">Competitive Landscape</h1>
-            <div class=\"accent-line mb-8\"></div>
+          <div class=\"mb-3\">
+            <h1 class=\"text-4xl font-bold mb-1\">Competitive Landscape</h1>
+            <div class=\"accent-line mb-3\"></div>
           </div>
-          <div class=\"mb-8\">
-            <h2 class=\"text-2xl font-semibold accent-blue mb-6\">Global Market Share Distribution 2024</h2>
+          <div class=\"mb-4\">
+            <h2 class=\"text-2xl font-semibold accent-blue mb-3\">Global Market Share Distribution 2024</h2>
             <div>
               <div class=\"bar-row\"><div class=\"bar-label\">AB InBev</div><div class=\"bar-wrap\"><div class=\"bar\" style=\"width:26.4%\">26.4%</div></div></div>
               <div class=\"bar-row\"><div class=\"bar-label\">Heineken</div><div class=\"bar-wrap\"><div class=\"bar\" style=\"width:12.1%\">12.1%</div></div></div>
@@ -731,16 +746,16 @@ DEMO_SLIDES: List[str] = [
           </div>
           <div class=\"grid2\">
             <div>
-              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Key Global Competitors</h2>
-              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">AB InBev</h3><p style=\"margin-bottom:8px\"><b>Key Brands:</b> Budweiser, Stella Artois, Corona, Beck's</p><p><b>Regional Strength:</b> Americas, Europe, Asia‑Pacific</p></div>
-              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Carlsberg Group</h3><p style=\"margin-bottom:8px\"><b>Key Brands:</b> Carlsberg, Tuborg, Kronenbourg 1664</p><p><b>Regional Strength:</b> Northern/Eastern Europe, Asia</p></div>
-              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Molson Coors</h3><p style=\"margin-bottom:8px\"><b>Key Brands:</b> Coors Light, Miller Lite, Blue Moon</p><p><b>Regional Strength:</b> North America, UK</p></div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-2\">Key Global Competitors</h2>
+              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">AB InBev</h3><p style=\"margin-bottom:4px;font-size:13px\"><b>Key Brands:</b> Budweiser, Stella Artois, Corona, Beck's</p><p style=\"font-size:13px\"><b>Regional Strength:</b> Americas, Europe, Asia‑Pacific</p></div>
+              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Carlsberg Group</h3><p style=\"margin-bottom:4px;font-size:13px\"><b>Key Brands:</b> Carlsberg, Tuborg, Kronenbourg 1664</p><p style=\"font-size:13px\"><b>Regional Strength:</b> Northern/Eastern Europe, Asia</p></div>
+              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Molson Coors</h3><p style=\"margin-bottom:4px;font-size:13px\"><b>Key Brands:</b> Coors Light, Miller Lite, Blue Moon</p><p style=\"font-size:13px\"><b>Regional Strength:</b> North America, UK</p></div>
             </div>
             <div>
-              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Regional Competitors</h2>
-              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Asahi Group Holdings</h3><p style=\"margin-bottom:8px\"><b>Key Brands:</b> Asahi Super Dry, Peroni, Grolsch</p><p><b>Regional Strength:</b> Japan, Oceania, Europe</p></div>
-              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Tsingtao Brewery</h3><p style=\"margin-bottom:8px\"><b>Key Brands:</b> Tsingtao</p><p><b>Regional Strength:</b> China, East Asia</p></div>
-              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Constellation Brands</h3><p style=\"margin-bottom:8px\"><b>Key Brands:</b> Modelo, Corona (US rights), Pacifico</p><p><b>Regional Strength:</b> North America</p></div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-2\">Regional Competitors</h2>
+              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Asahi Group Holdings</h3><p style=\"margin-bottom:4px;font-size:13px\"><b>Key Brands:</b> Asahi Super Dry, Peroni, Grolsch</p><p style=\"font-size:13px\"><b>Regional Strength:</b> Japan, Oceania, Europe</p></div>
+              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Tsingtao Brewery</h3><p style=\"margin-bottom:4px;font-size:13px\"><b>Key Brands:</b> Tsingtao</p><p style=\"font-size:13px\"><b>Regional Strength:</b> China, East Asia</p></div>
+              <div class=\"comp-card\"><h3 class=\"text-xl font-semibold\">Constellation Brands</h3><p style=\"margin-bottom:4px;font-size:13px\"><b>Key Brands:</b> Modelo, Corona (US rights), Pacifico</p><p style=\"font-size:13px\"><b>Regional Strength:</b> North America</p></div>
             </div>
           </div>
         </div>
@@ -811,29 +826,29 @@ DEMO_SLIDES: List[str] = [
         .demo-benchmark-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-benchmark-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-benchmark-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-benchmark-slide .content-container{padding-left:0;padding-right:0}
-        .demo-benchmark-slide .text-4xl{font-size:32px;line-height:1.25}
-        .demo-benchmark-slide .text-2xl{font-size:24px}
+        .demo-benchmark-slide .content-container{padding-left:0;padding-right:0;margin-top:0;margin-bottom:0}
+        .demo-benchmark-slide .text-4xl{font-size:28px;line-height:1.2}
+        .demo-benchmark-slide .text-2xl{font-size:20px}
         .demo-benchmark-slide .font-bold{font-weight:700}
         .demo-benchmark-slide .font-semibold{font-weight:600}
         .demo-benchmark-slide .accent-blue{color:#1A9AFA}
         .demo-benchmark-slide .table{width:100%;border-collapse:collapse}
-        .demo-benchmark-slide .table th{background:#f5f5f7;padding:12px;text-align:left;font-weight:700;border-bottom:2px solid #1A9AFA}
-        .demo-benchmark-slide .table td{padding:12px;border-bottom:1px solid #e5e5e5}
+        .demo-benchmark-slide .table th{background:#f5f5f7;padding:8px;text-align:left;font-weight:700;border-bottom:2px solid #1A9AFA;font-size:12px}
+        .demo-benchmark-slide .table td{padding:8px;border-bottom:1px solid #e5e5e5;font-size:12px}
         .demo-benchmark-slide .hl{color:#1A9AFA;font-weight:700}
         .demo-benchmark-slide .hk{background:#f0f8ff}
-        .demo-benchmark-slide .placeholder{height:250px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
-        .demo-benchmark-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-        .demo-benchmark-slide .card{border-left:4px solid #1A9AFA;padding:12px;background:#f5f5f7}
-        .demo-benchmark-slide .chart-container{height:250px;position:relative}
+        .demo-benchmark-slide .placeholder{height:180px;border:1px dashed #C4C4CD;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#7A7A7A}
+        .demo-benchmark-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+        .demo-benchmark-slide .card{border-left:4px solid #1A9AFA;padding:8px;background:#f5f5f7}
+        .demo-benchmark-slide .chart-container{height:180px;position:relative}
       </style>
       <div class=\"slide-container\">
         <div class=\"content-container\">
-          <div class=\"mb-6\">
-            <h1 class=\"text-4xl font-bold mb-2\">Competitor Benchmarking</h1>
-            <div class=\"accent-line mb-6\"></div>
+          <div class=\"mb-3\">
+            <h1 class=\"text-4xl font-bold mb-1\">Competitor Benchmarking</h1>
+            <div class=\"accent-line mb-3\"></div>
           </div>
-          <div class=\"mb-6\">
+          <div class=\"mb-4\">
             <table class=\"table\">
               <thead>
                 <tr>
@@ -856,13 +871,13 @@ DEMO_SLIDES: List[str] = [
           </div>
           <div class=\"grid2\">
             <div>
-              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Competitive Position Comparison</h2>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-2\">Competitive Position Comparison</h2>
               <div class=\"chart-container\"><canvas id=\"bench_radar\"></canvas></div>
-              <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:8px\">Source: Company reports, industry analysis, EY‑Parthenon analysis (2024–2025)</div>
+              <div style=\"font-size:10px;color:#6b7280;text-align:center;margin-top:4px\">Source: Company reports, industry analysis, EY‑Parthenon analysis (2024–2025)</div>
             </div>
             <div class=\"card\">
-              <h3 class=\"font-bold\" style=\"margin-bottom:6px\">Key Insights</h3>
-              <div style=\"font-size:14px\">Heineken maintains strong operating margins and premium positioning; AB InBev leads in revenue and share; Heineken shows momentum in EM and LONO.</div>
+              <h3 class=\"font-bold\" style=\"margin-bottom:4px;font-size:14px\">Key Insights</h3>
+              <div style=\"font-size:12px\">Heineken maintains strong operating margins and premium positioning; AB InBev leads in revenue and share; Heineken shows momentum in EM and LONO.</div>
             </div>
           </div>
         </div>
@@ -1107,35 +1122,38 @@ DEMO_SLIDES: List[str] = [
         .demo-scenarios-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-scenarios-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-scenarios-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-scenarios-slide .content-container{padding-left:0;padding-right}
-        .demo-scenarios-slide .text-4xl{font-size:32px;line-height:1.25}
+        .demo-scenarios-slide .content-container{padding-left:0;padding-right:0;margin-top:0;margin-bottom:0}
+        .demo-scenarios-slide .text-4xl{font-size:28px;line-height:1.2}
         .demo-scenarios-slide .font-bold{font-weight:700}
-        .demo-scenarios-slide .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px}
-        .demo-scenarios-slide .scenario-card{border-left:4px solid #1A9AFA;padding:12px;background:#f5f5f7;height:100%}
+        .demo-scenarios-slide .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+        .demo-scenarios-slide .scenario-card{border-left:4px solid #1A9AFA;padding:6px;background:#f5f5f7;height:100%}
         .demo-scenarios-slide .scenario-bull{border-left-color:#00A550}
         .demo-scenarios-slide .scenario-bear{border-left-color:#FF6B6B}
         .demo-scenarios-slide .bull-highlight{color:#00A550;font-weight:700}
         .demo-scenarios-slide .bear-highlight{color:#FF6B6B;font-weight:700}
         .demo-scenarios-slide .base-highlight{color:#1A9AFA;font-weight:700}
-        .demo-scenarios-slide .chart-container{height:250px;position:relative}
+        .demo-scenarios-slide .chart-container{height:140px;position:relative}
+        .demo-scenarios-slide .data-table{width:100%;border-collapse:collapse}
+        .demo-scenarios-slide .data-table th{background:#f5f5f7;padding:4px;text-align:left;font-weight:700;border-bottom:2px solid #1A9AFA;font-size:11px}
+        .demo-scenarios-slide .data-table td{padding:4px;border-bottom:1px solid #e5e5e5;font-size:11px}
       </style>
       <div class=\"slide-container bg-white flex flex-col\">
         <div class=\"w-full h-2 bg-white\"></div>
         <div class=\"absolute left-0 top-0 bottom-0 w-12 bg-white\"></div>
-        <div class=\"flex flex-col content-container mt-12 mb-8\">
-          <div class=\"mb-6\">
-            <h1 class=\"text-4xl font-bold mb-2\">Bear, Base, and Bull Case Scenarios</h1>
-            <div class=\"accent-line mb-6\"></div>
+        <div class=\"flex flex-col content-container mt-4 mb-2\">
+          <div class=\"mb-2\">
+            <h1 class=\"text-4xl font-bold mb-1\">Bear, Base, and Bull Case Scenarios</h1>
+            <div class=\"accent-line mb-2\"></div>
           </div>
-          <div class=\"mb-6\">
-            <div class=\"chart-container\" style=\"height:256px\"><canvas id=\"scenarioChart\"></canvas></div>
-            <div style=\"font-size:12px;color:#6b7280;text-align:center;margin-top:8px\">Heineken 5-Year Growth Scenarios (CAGR 2025-2030)</div>
+          <div class=\"mb-3\">
+            <div class=\"chart-container\" style=\"height:140px\"><canvas id=\"scenarioChart\"></canvas></div>
+            <div style=\"font-size:9px;color:#6b7280;text-align:center;margin-top:2px\">Heineken 5-Year Growth Scenarios (CAGR 2025-2030)</div>
           </div>
-          <div class=\"grid3 mb-6\">
+          <div class=\"grid3 mb-3\">
             <div>
               <div class=\"scenario-card scenario-bear\">
-                <h3 class=\"font-bold mb-2\">Bear Case: <span class=\"bear-highlight\">2.1% CAGR</span></h3>
-                <ul style=\"margin-left:16px;list-style:disc;font-size:14px\">
+                <h3 class=\"font-bold mb-1\" style=\"font-size:13px\">Bear Case: <span class=\"bear-highlight\">2.1% CAGR</span></h3>
+                <ul style=\"margin-left:10px;list-style:disc;font-size:11px\">
                   <li>Increased regulation & taxation</li>
                   <li>Accelerated decline in EU beer consumption</li>
                   <li>Economic pressure in emerging markets</li>
@@ -1145,8 +1163,8 @@ DEMO_SLIDES: List[str] = [
             </div>
             <div>
               <div class=\"scenario-card\">
-                <h3 class=\"font-bold mb-2\">Base Case: <span class=\"base-highlight\">4.0% CAGR</span></h3>
-                <ul style=\"margin-left:16px;list-style:disc;font-size:14px\">
+                <h3 class=\"font-bold mb-1\" style=\"font-size:13px\">Base Case: <span class=\"base-highlight\">4.0% CAGR</span></h3>
+                <ul style=\"margin-left:10px;list-style:disc;font-size:11px\">
                   <li>Moderate economic growth globally</li>
                   <li>Premiumization continues</li>
                   <li>Steady LONO expansion</li>
@@ -1156,8 +1174,8 @@ DEMO_SLIDES: List[str] = [
             </div>
             <div>
               <div class=\"scenario-card scenario-bull\">
-                <h3 class=\"font-bold mb-2\">Bull Case: <span class=\"bull-highlight\">6.2% CAGR</span></h3>
-                <ul style=\"margin-left:16px;list-style:disc;font-size:14px\">
+                <h3 class=\"font-bold mb-1\" style=\"font-size:13px\">Bull Case: <span class=\"bull-highlight\">6.2% CAGR</span></h3>
+                <ul style=\"margin-left:10px;list-style:disc;font-size:11px\">
                   <li>Strong APAC & Africa expansion</li>
                   <li>LONO leadership & market creation</li>
                   <li>Beyond-beer innovations</li>
@@ -1167,7 +1185,7 @@ DEMO_SLIDES: List[str] = [
             </div>
           </div>
           <div>
-            <h3 class=\"font-bold mb-2\">CAGR by Segment (2025-2030)</h3>
+            <h3 class=\"font-bold mb-1\" style=\"font-size:13px\">CAGR by Segment (2025-2030)</h3>
             <table class=\"data-table\" style=\"width:100%;border-collapse:collapse\">
               <thead>
                 <tr>
@@ -1215,64 +1233,60 @@ DEMO_SLIDES: List[str] = [
         .demo-conclusion-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-conclusion-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-conclusion-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-conclusion-slide .content-container{padding-left:0;padding-right:0}
-        .demo-conclusion-slide .text-4xl{font-size:32px;line-height:1.25}
-        .demo-conclusion-slide .text-2xl{font-size:24px}
+        .demo-conclusion-slide .content-container{padding-left:0;padding-right:0;margin-top:0;margin-bottom:0}
+        .demo-conclusion-slide .text-4xl{font-size:28px;line-height:1.2}
+        .demo-conclusion-slide .text-2xl{font-size:20px}
         .demo-conclusion-slide .font-bold{font-weight:700}
         .demo-conclusion-slide .font-semibold{font-weight:600}
         .demo-conclusion-slide .accent-blue{color:#1A9AFA}
-        .demo-conclusion-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:32px}
-        .demo-conclusion-slide .bullet-point{display:flex;margin-bottom:14px}
-        .demo-conclusion-slide .bullet-icon{color:#1A9AFA;margin-right:12px;flex-shrink:0;margin-top:4px}
-        .demo-conclusion-slide .highlight-box{background:#F5F7FA;border-left:4px solid #1A9AFA;padding:16px;margin:16px 0}
+        .demo-conclusion-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+        .demo-conclusion-slide .bullet-point{display:flex;margin-bottom:6px}
+        .demo-conclusion-slide .bullet-icon{color:#1A9AFA;margin-right:6px;flex-shrink:0;margin-top:1px}
+        .demo-conclusion-slide .highlight-box{background:#F5F7FA;border-left:4px solid #1A9AFA;padding:8px;margin:6px 0}
       </style>
       <div class=\"slide-container bg-white flex flex-col\">
         <div class=\"w-full h-2 bg-white\"></div>
         <div class=\"absolute left-0 top-0 bottom-0 w-12 bg-white\"></div>
         <div class=\"flex flex-col content-container\">
-          <div class=\"mb-6\">
-            <h1 class=\"text-4xl font-bold mb-2\">Conclusion &amp; Recommendations</h1>
-            <div class=\"accent-line mb-8\"></div>
+          <div class=\"mb-3\">
+            <h1 class=\"text-4xl font-bold mb-1\">Conclusion &amp; Recommendations</h1>
+            <div class=\"accent-line mb-3\"></div>
           </div>
           <div class=\"grid2\">
             <div>
-              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Strategic Assessment</h2>
-              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Strong Market Position:</span> Heineken is well positioned as the world's second-largest brewer with leading premium portfolio</div></div>
-              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Premium Leader:</span> Dominant position in premium segment provides pricing power and margin resilience</div></div>
-              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Innovation Pipeline:</span> Early mover in LONO category with Heineken 0.0 proving successful growth driver</div></div>
-              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Regional Growth:</span> Strong performance in key emerging markets (Brazil, Vietnam, India) offsetting mature European markets</div></div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-2\">Strategic Assessment</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div style=\"font-size:12px\"><span class=\"font-semibold\">Strong Market Position:</span> World's second-largest brewer with leading premium portfolio</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div style=\"font-size:12px\"><span class=\"font-semibold\">Premium Leader:</span> Dominant position provides pricing power and margin resilience</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div style=\"font-size:12px\"><span class=\"font-semibold\">Innovation Pipeline:</span> Early mover in LONO category with successful growth drivers</div></div>
               <div class=\"highlight-box\">
-                <p class=\"text-lg font-semibold mb-1\">EY-Parthenon Assessment</p>
-                <p>Heineken demonstrates strong fundamentals with clear growth strategy and execution capabilities. The company is effectively navigating market evolution with balanced focus on premiumization, innovation, and operational excellence.</p>
+                <p class=\"font-semibold mb-1\" style=\"font-size:13px\">EY-Parthenon Assessment</p>
+                <p style=\"font-size:11px\">Heineken demonstrates strong fundamentals with clear growth strategy and execution capabilities.</p>
               </div>
             </div>
             <div>
-              <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Key Recommendations</h2>
-              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Accelerate APAC Expansion:</span> Further invest in high-growth markets like Vietnam, India, and selective Chinese urban centers</div></div>
-              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Beyond Beer Portfolio:</span> Expand innovation in adjacent categories to capture changing consumer preferences</div></div>
-              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">Digital Transformation:</span> Continue investing in eB2B platforms, AI-driven operations, and direct-to-consumer channels</div></div>
-              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">LONO Leadership:</span> Leverage first-mover advantage to expand non-alcoholic portfolio as category leader</div></div>
-              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div><span class=\"font-semibold\">ESG Integration:</span> Continue sustainability initiatives that enhance brand value while reducing operational costs</div></div>
+              <h2 class=\"text-2xl font-semibold accent-blue mb-2\">Key Recommendations</h2>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div style=\"font-size:12px\"><span class=\"font-semibold\">Accelerate APAC Expansion:</span> Invest in high-growth markets like Vietnam, India</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div style=\"font-size:12px\"><span class=\"font-semibold\">Beyond Beer Portfolio:</span> Expand innovation in adjacent categories</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div style=\"font-size:12px\"><span class=\"font-semibold\">Digital Transformation:</span> Continue investing in eB2B platforms and AI-driven operations</div></div>
+              <div class=\"bullet-point\"><div class=\"bullet-icon\">•</div><div style=\"font-size:12px\"><span class=\"font-semibold\">LONO Leadership:</span> Leverage first-mover advantage in non-alcoholic portfolio</div></div>
             </div>
           </div>
-          <div class=\"mt-8\">
-            <h2 class=\"text-2xl font-semibold accent-blue mb-4\">Investment View</h2>
-            <div class=\"flex items-center\">
-              <div class=\"w-1/4 text-center p-4\">
-                <div class=\"text-5xl font-bold accent-blue mb-2\">4-8%</div>
-                <div class=\"text-sm\">Operating Profit (beia) Growth (2025)</div>
+          <div class=\"mt-3\">
+            <h2 class=\"text-2xl font-semibold accent-blue mb-2\">Investment View</h2>
+            <div class=\"grid2\" style=\"gap:12px\">
+              <div class=\"highlight-box\" style=\"text-align:center\">
+                <div class=\"text-2xl font-bold accent-blue mb-1\">4-8%</div>
+                <div class=\"text-sm font-semibold\">Operating Profit Growth (2025)</div>
               </div>
-              <div class=\"w-1/4 text-center p-4\">
-                <div class=\"text-5xl font-bold accent-blue mb-2\">15.1%</div>
-                <div class=\"text-sm\">Operating Margin (2024)</div>
+              <div class=\"highlight-box\" style=\"text-align:center\">
+                <div class=\"text-2xl font-bold accent-blue mb-1\">15.1%</div>
+                <div class=\"text-sm font-semibold\">Operating Margin (2024)</div>
               </div>
-              <div class=\"w-1/2\">
-                <div class=\"highlight-box\">
-                  <p class=\"font-semibold mb-2\">EY-Parthenon Investment Recommendation</p>
-                  <p class=\"text-lg\">BUY / HOLD for long-term value creation</p>
-                  <p class=\"mt-2\">Heineken presents a compelling investment case with disciplined execution of its EverGreen strategy and focus on high-growth premium and LONO segments.</p>
-                </div>
-              </div>
+            </div>
+            <div class=\"highlight-box\" style=\"margin-top:8px;text-align:center\">
+              <p class=\"font-semibold mb-1\" style=\"font-size:13px\">EY-Parthenon Investment Recommendation</p>
+              <p class=\"font-semibold\" style=\"font-size:16px;color:#1A9AFA\">BUY / HOLD</p>
+              <p class=\"mt-1\" style=\"font-size:11px\">Long-term value creation opportunity</p>
             </div>
           </div>
         </div>
@@ -2075,3 +2089,4 @@ if __name__ == "__main__":
         port=8000,
         reload=True
     )
+

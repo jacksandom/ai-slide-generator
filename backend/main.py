@@ -187,7 +187,7 @@ DEMO_SLIDES: List[str] = [
         .demo-overview-slide { font-family: Arial, sans-serif; color: #2E2E38; }
         .demo-overview-slide .slide-container { width: 1280px; height: 720px; position: relative; overflow: hidden; background: #FFFFFF; }
         .demo-overview-slide .accent-line { background-color: #1A9AFA; height: 4px; width: 80px; }
-        .demo-overview-slide .content-container { padding-left: 100px; padding-right: 100px; margin-top: 64px; }
+        .demo-overview-slide .content-container { padding-left: 100px; padding-right: 100px; }
         .demo-overview-slide .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
         .demo-overview-slide .text-4xl { font-size: 32px; line-height: 1.25; }
         .demo-overview-slide .text-2xl { font-size: 24px; }
@@ -252,7 +252,7 @@ DEMO_SLIDES: List[str] = [
         .demo-value-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-value-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-value-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-value-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
+        .demo-value-slide .content-container{padding-left:0;padding-right:0}
         .demo-value-slide .grid{display:grid;grid-template-columns:1fr 1fr;gap:32px}
         .demo-value-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-value-slide .text-2xl{font-size:24px}
@@ -316,7 +316,7 @@ DEMO_SLIDES: List[str] = [
         .demo-market-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-market-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-market-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-market-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
+        .demo-market-slide .content-container{padding-left:0;padding-right:0}
         .demo-market-slide .grid{display:grid;grid-template-columns:1fr 1fr;gap:32px}
         .demo-market-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-market-slide .text-2xl{font-size:24px}
@@ -372,7 +372,7 @@ DEMO_SLIDES: List[str] = [
         .demo-segment-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-segment-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-segment-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-segment-slide .content-container{padding-left:0;padding-right:0;margin-top:48px;margin-bottom:24px}
+        .demo-segment-slide .content-container{padding-left:0;padding-right;margin-bottom:12px}
         .demo-segment-slide .grid2{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:12px}
         .demo-segment-slide .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:8px}
         .demo-segment-slide .text-4xl{font-size:32px;line-height:1.25}
@@ -465,7 +465,7 @@ DEMO_SLIDES: List[str] = [
         .demo-competitors-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-competitors-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-competitors-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-competitors-slide .content-container{padding-left:0;padding-right:0;margin-top:32px;margin-bottom:12px}
+        .demo-competitors-slide .content-container{padding-left:0;padding-right:0;margin-bottom:12px}
         .demo-competitors-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-competitors-slide .text-2xl{font-size:24px}
         .demo-competitors-slide .font-bold{font-weight:700}
@@ -544,7 +544,7 @@ DEMO_SLIDES: List[str] = [
         .demo-growth-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-growth-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-growth-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-growth-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
+        .demo-growth-slide .content-container{padding-left:0;padding-right:0}
         .demo-growth-slide .grid{display:grid;grid-template-columns:1fr 1fr;gap:32px}
         .demo-growth-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-growth-slide .text-2xl{font-size:24px}
@@ -591,7 +591,7 @@ DEMO_SLIDES: List[str] = [
         .demo-financial-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-financial-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-financial-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-financial-slide .content-container{padding-left:0;padding-right:0;margin-top:48px;margin-bottom:24px}
+        .demo-financial-slide .content-container{padding-left:0;padding-right:0}
         .demo-financial-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-financial-slide .text-xl{font-size:20px}
         .demo-financial-slide .font-bold{font-weight:700}
@@ -699,7 +699,7 @@ DEMO_SLIDES: List[str] = [
         .demo-competitive-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-competitive-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-competitive-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-competitive-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
+        .demo-competitive-slide .content-container{padding-left:0;padding-right:0}
         .demo-competitive-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-competitive-slide .text-2xl{font-size:24px}
         .demo-competitive-slide .text-xl{font-size:20px}
@@ -755,7 +755,7 @@ DEMO_SLIDES: List[str] = [
         .demo-exec-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-exec-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-exec-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-exec-slide .content-container{padding-left:0;padding-right:0;margin-top:40px}
+        .demo-exec-slide .content-container{padding-left:0;padding-right:0}
         .demo-exec-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-exec-slide .text-2xl{font-size:24px}
         .demo-exec-slide .font-bold{font-weight:700}
@@ -811,7 +811,7 @@ DEMO_SLIDES: List[str] = [
         .demo-benchmark-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-benchmark-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-benchmark-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-benchmark-slide .content-container{padding-left:0;padding-right:0;margin-top:48px;margin-bottom:24px}
+        .demo-benchmark-slide .content-container{padding-left:0;padding-right:0}
         .demo-benchmark-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-benchmark-slide .text-2xl{font-size:24px}
         .demo-benchmark-slide .font-bold{font-weight:700}
@@ -901,7 +901,7 @@ DEMO_SLIDES: List[str] = [
         .demo-competitive-position-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-competitive-position-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-competitive-position-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-competitive-position-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
+        .demo-competitive-position-slide .content-container{padding-left:0;padding-right:0}
         .demo-competitive-position-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-competitive-position-slide .text-2xl{font-size:24px}
         .demo-competitive-position-slide .font-bold{font-weight:700}
@@ -957,7 +957,7 @@ DEMO_SLIDES: List[str] = [
         .demo-opportunities-threats-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-opportunities-threats-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-opportunities-threats-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-opportunities-threats-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
+        .demo-opportunities-threats-slide .content-container{padding-left:0;padding-right:0}
         .demo-opportunities-threats-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-opportunities-threats-slide .text-2xl{font-size:24px}
         .demo-opportunities-threats-slide .font-bold{font-weight:700}
@@ -1107,7 +1107,7 @@ DEMO_SLIDES: List[str] = [
         .demo-scenarios-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-scenarios-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-scenarios-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-scenarios-slide .content-container{padding-left:0;padding-right:0;margin-top:48px;margin-bottom:24px}
+        .demo-scenarios-slide .content-container{padding-left:0;padding-right}
         .demo-scenarios-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-scenarios-slide .font-bold{font-weight:700}
         .demo-scenarios-slide .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px}
@@ -1215,7 +1215,7 @@ DEMO_SLIDES: List[str] = [
         .demo-conclusion-slide{font-family:Arial,sans-serif;color:#2E2E38}
         .demo-conclusion-slide .slide-container{width:1280px;height:720px;position:relative;overflow:hidden;background:#FFFFFF}
         .demo-conclusion-slide .accent-line{background:#1A9AFA;height:4px;width:80px}
-        .demo-conclusion-slide .content-container{padding-left:0;padding-right:0;margin-top:64px}
+        .demo-conclusion-slide .content-container{padding-left:0;padding-right:0}
         .demo-conclusion-slide .text-4xl{font-size:32px;line-height:1.25}
         .demo-conclusion-slide .text-2xl{font-size:24px}
         .demo-conclusion-slide .font-bold{font-weight:700}
@@ -1338,18 +1338,18 @@ def _build_toc_html_from_deck(deck: html_slides.HtmlDeck) -> str:
         .relative {{ position:relative; }}
         .left-0 {{ left:0; }}
         .bottom-0 {{ bottom:0; }}
-        .mt-8 {{ margin-top:32px; }}
+        .mt-4 {{ margin-top:16px; }}
+        .mb-2 {{ margin-bottom:8px; }}
         .mb-4 {{ margin-bottom:16px; }}
-        .mb-6 {{ margin-bottom:24px; }}
         .mb-2 {{ margin-bottom:8px; }}
         .text-4xl {{ font-size:32px; font-weight:700; }}
       </style>
       <div class=\"w-full h-2 bg-white\"></div>
       <div class=\"absolute left-0 top-0 bottom-0 w-12 bg-white\"></div>
-      <div class=\"flex flex-col toc-container mt-8\">
-        <div class=\"mb-4\">
+      <div class=\"flex flex-col toc-container mt-4\">
+        <div class=\"mb-2\">
           <h1 class=\"text-4xl mb-2\">Table of Contents</h1>
-          <div class=\"accent-line mb-6\"></div>
+          <div class=\"accent-line mb-4\"></div>
         </div>
         <div class=\"grid grid-cols-2 gap-x-12 gap-y-4\">
           <div>{left_html}</div>

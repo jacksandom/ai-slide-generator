@@ -272,7 +272,7 @@ class SlideTheme:
           display: grid;
           grid-template-columns: repeat(var(--cols), 1fr);
           gap: 24px;
-          margin-top: 8px;
+          margin-top: 6px;
           flex: 1;
         }}
         .reveal .columns[style*="--cols:2"] {{ font-size: clamp(12px, 1.8vw, {max(self.body_font_size_px-2, 12)}px); }}
@@ -287,7 +287,7 @@ class SlideTheme:
           width: 120px;
           height: 6px;
           background: {self.rgb(self.title_bar_rgb)};
-          margin: 4px 0 8px 0;
+          margin: 4px 0 6px 0;
         }}
         
         /* Title slide */
@@ -296,7 +296,7 @@ class SlideTheme:
           flex-direction: column;
           align-items: flex-start;
           justify-content: flex-start;
-          margin-top: 15vh;
+          margin-top: 8vh;
           text-align: left;
           padding: 16px;
           box-sizing: border-box;
@@ -317,7 +317,7 @@ class SlideTheme:
         
         /* Agenda slide */
         .reveal .agenda-slide {{
-          margin-top: 5vh;
+          margin-top: 2vh;
           text-align: left;
           padding: 16px;
           box-sizing: border-box;
@@ -362,7 +362,7 @@ class SlideTheme:
           font-weight: 400;
           font-size: 24px;
           color: {self.rgb((102, 163, 255))};
-          margin-bottom: 8px;
+          margin-bottom: 6px;
         }}
         .reveal .columns.with-dividers .col {{
           border-right: 2px solid rgba(102, 163, 255, 0.25);
@@ -372,7 +372,7 @@ class SlideTheme:
         }}
         /* Custom content styling */
         .reveal .custom-content {{
-          margin-top: 16px;
+          margin-top: 12px;
           line-height: 1.6;
           flex: 1;
           font-size: clamp(11px, 1.3vw, {max(self.body_font_size_px-2, 14)}px);

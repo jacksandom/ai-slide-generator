@@ -95,12 +95,19 @@ const Title = styled.h1`
   font-size: 1.2rem;
   font-weight: 600;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  margin-left: 6px; /* nudge slightly to the right */
 `;
 
 const Actions = styled.div`
   display: flex;
   align-items: center;
   gap: 10px;
+`;
+
+const PartnerLogo = styled.img`
+  height: 20px;
+  display: block;
+  max-width: 140px;
 `;
 
 const PrimaryButton = styled.button`
@@ -285,9 +292,14 @@ const App: React.FC = () => {
               <LogoBox>
                 <EYParthenonLogo />
               </LogoBox>
-              <Title>EY Slide Generator</Title>
+              <Title>AI Slide Generator</Title>
             </Brand>
             <Actions>
+              <PartnerLogo
+                src="https://cdn.bfldr.com/9AYANS2F/at/9wpgrcfzpk398zww8zj72hws/small-scale-lockup-full-color-white-rgb.svg?auto=webp"
+                alt="Databricks Logo"
+                onError={(e) => (e.currentTarget.style.display = 'none')}
+              />
               <PrimaryButton onClick={refreshSlides}>Refresh</PrimaryButton>
               <PrimaryButton onClick={exportSlides}>Download</PrimaryButton>
               <PrimaryButton onClick={resetSlides}>Reset</PrimaryButton>

@@ -272,7 +272,7 @@ interface ToolGroup {
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputValue, setInputValue] = useState('Generate a succinct report EY Parthenon. Do not generate more than 5 slides. Use the information available in your tools. Use visualisations. Include an overview slide of EY Parthenon. Think about your response.');
+  const [inputValue, setInputValue] = useState('Please provide a comprehensive commercial due diligence report on the following company: Heineken');
   const [isLoading, setIsLoading] = useState(false);
   const [lastMessageCount, setLastMessageCount] = useState(0);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
@@ -532,7 +532,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder="Hi! I'm your AI slide creation assistant. I can create bespoke presentations leveraging our proprietary assets as well as public information from the Internet"
+          placeholder="Please provide a comprehensive commercial due diligence report on the following company: Heineken"
           disabled={isLoading}
         />
         <SendButton onClick={handleSendMessage} disabled={isLoading || !inputValue.trim()}>

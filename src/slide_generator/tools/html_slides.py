@@ -231,13 +231,14 @@ class SlideTheme:
           overflow: hidden;
         }}
         
-        /* Slide containers - perfect alignment */
+        /* Slide containers - perfect alignment with padding */
         .slide-container {{
           width: 1280px !important;
           height: 720px !important;
           margin: 0 !important;
-          padding: 0 !important;
+          padding: 24px !important;
           position: relative;
+          box-sizing: border-box;
         }}
         
         /* Content slides - no positioning conflicts */
@@ -245,9 +246,10 @@ class SlideTheme:
           width: 100% !important;
           height: 100% !important;
           margin: 0 !important;
-          padding: 0 !important;
+          padding: 16px !important;
           display: flex;
           flex-direction: column;
+          box-sizing: border-box;
         }}
         /* Typography */
         .reveal {{ font-family: {self.font_family}; }}
@@ -270,7 +272,7 @@ class SlideTheme:
           display: grid;
           grid-template-columns: repeat(var(--cols), 1fr);
           gap: 24px;
-          margin-top: 16px;
+          margin-top: 8px;
           flex: 1;
         }}
         .reveal .columns[style*="--cols:2"] {{ font-size: clamp(12px, 1.8vw, {max(self.body_font_size_px-2, 12)}px); }}
@@ -285,7 +287,7 @@ class SlideTheme:
           width: 120px;
           height: 6px;
           background: {self.rgb(self.title_bar_rgb)};
-          margin: 8px 0 12px 0;
+          margin: 4px 0 8px 0;
         }}
         
         /* Title slide */
@@ -294,8 +296,10 @@ class SlideTheme:
           flex-direction: column;
           align-items: flex-start;
           justify-content: flex-start;
-          margin-top: 25vh;
+          margin-top: 15vh;
           text-align: left;
+          padding: 16px;
+          box-sizing: border-box;
         }}
         .reveal .title-slide h1.title {{
           font-family: {self.title_font_family};
@@ -313,8 +317,10 @@ class SlideTheme:
         
         /* Agenda slide */
         .reveal .agenda-slide {{
-          margin-top: 10vh;
+          margin-top: 5vh;
           text-align: left;
+          padding: 16px;
+          box-sizing: border-box;
         }}
         .reveal .agenda-columns {{
           display: grid;
@@ -416,22 +422,7 @@ class SlideTheme:
         }}
         /* Navigation controls */
         .reveal .controls {{ display: none; }}
-        .reveal .slide-number {{
-          position: fixed;
-          bottom: 20px;
-          left: 50%;
-          transform: translateX(-50%);
-          background: rgba(37, 99, 235, 0.9);
-          color: white;
-          padding: 6px 12px;
-          border-radius: 16px;
-          font-weight: 500;
-          font-size: 14px;
-          z-index: 1000;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-          display: none;
-        }}
-        .reveal.has-real-slides .slide-number {{ display: block; }}
+        .reveal .slide-number {{ display: none !important; }}
         .reveal.focused {{ outline: none; }}
         
         /* Bottom-right EY Parthenon logo */

@@ -1338,18 +1338,18 @@ def _build_toc_html_from_deck(deck: html_slides.HtmlDeck) -> str:
         .relative {{ position:relative; }}
         .left-0 {{ left:0; }}
         .bottom-0 {{ bottom:0; }}
-        .mt-16 {{ margin-top:64px; }}
+        .mt-8 {{ margin-top:32px; }}
+        .mb-4 {{ margin-bottom:16px; }}
         .mb-6 {{ margin-bottom:24px; }}
-        .mb-8 {{ margin-bottom:32px; }}
         .mb-2 {{ margin-bottom:8px; }}
         .text-4xl {{ font-size:32px; font-weight:700; }}
       </style>
       <div class=\"w-full h-2 bg-white\"></div>
       <div class=\"absolute left-0 top-0 bottom-0 w-12 bg-white\"></div>
-      <div class=\"flex flex-col toc-container mt-16\">
-        <div class=\"mb-6\">
+      <div class=\"flex flex-col toc-container mt-8\">
+        <div class=\"mb-4\">
           <h1 class=\"text-4xl mb-2\">Table of Contents</h1>
-          <div class=\"accent-line mb-8\"></div>
+          <div class=\"accent-line mb-6\"></div>
         </div>
         <div class=\"grid grid-cols-2 gap-x-12 gap-y-4\">
           <div>{left_html}</div>

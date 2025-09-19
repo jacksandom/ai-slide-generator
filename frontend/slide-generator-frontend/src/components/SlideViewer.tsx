@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import styled from 'styled-components';
 
 interface SlideViewerProps {
@@ -197,6 +197,117 @@ const LoadingOverlay = styled.div`
   z-index: 10;
 `;
 
+// Thumbnail component that updates only when clicked
+const ThumbnailFrame = React.memo<{
+  slideIndex: number;
+  html: string;
+  isActive: boolean;
+  onRefresh: number;
+}>(({ slideIndex, html, isActive, onRefresh }) => {
+  const [thumbnailContent, setThumbnailContent] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Generate thumbnail content
+  const generateThumbnailContent = useCallback(() => {
+    return `<html><head><style>html,body{margin:0;height:100%;overflow:hidden} .reveal{height:100vh} .reveal .slides{height:100%}</style>
+<script>try{location.hash='#/${slideIndex}';}catch(e){}</script></head><body>${html}
+<script>(function(){
+  var desired=${slideIndex};
+  function go(){
+    try{var d=window.__DECK__; if(d && typeof d.slide==='function'){d.slide(desired,0,0); return true;}}catch(e){}
+    return false;
+  }
+  if(!go()){
+    var iv=setInterval(function(){ if(go()) clearInterval(iv); }, 100);
+    setTimeout(function(){clearInterval(iv);}, 5000);
+  }
+})();</script>
+</body></html>`;
+  }, [slideIndex, html]);
+
+  // Update thumbnail when refresh is requested
+  useEffect(() => {
+    if (typeof onRefresh === 'number' && onRefresh > 0) {
+      setIsLoading(true);
+      // Small delay to show loading state
+      setTimeout(() => {
+        setThumbnailContent(generateThumbnailContent());
+        setIsLoading(false);
+      }, 100);
+    }
+  }, [onRefresh, generateThumbnailContent]);
+
+  // Initial load
+  useEffect(() => {
+    if (!thumbnailContent) {
+      setThumbnailContent(generateThumbnailContent());
+    }
+  }, [thumbnailContent, generateThumbnailContent]);
+
+  return (
+    <ThumbBox style={{ position: 'relative' }}>
+      {isLoading && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(255,255,255,0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '10px',
+          color: '#666',
+          zIndex: 1
+        }}>
+          ⟳
+        </div>
+      )}
+      <ThumbFrame
+        srcDoc={thumbnailContent}
+        sandbox="allow-scripts allow-same-origin"
+      />
+    </ThumbBox>
+  );
+});
+
+ThumbnailFrame.displayName = 'ThumbnailFrame';
+
+// Memoized slide list item to prevent unnecessary re-renders
+const SlideListItemMemo = React.memo<{
+  slide: { index: number; title: string };
+  activeIndex: number;
+  html: string;
+  onGotoSlide: (index: number) => void;
+}>(({ slide, activeIndex, html, onGotoSlide }) => {
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  const handleSlideClick = () => {
+    // Refresh thumbnail when slide is clicked
+    setRefreshTrigger(prev => prev + 1);
+    // Navigate to the clicked slide
+    onGotoSlide(slide.index);
+  };
+
+  return (
+    <SlideListItem $active={slide.index === activeIndex} onClick={handleSlideClick}>
+      <SlideTitleRow>
+        <SlideIndex>{slide.index + 1}</SlideIndex>
+        <SlideTitle>{slide.title}</SlideTitle>
+      </SlideTitleRow>
+      <ThumbnailFrame
+        slideIndex={slide.index}
+        html={html}
+        isActive={slide.index === activeIndex}
+        onRefresh={refreshTrigger}
+      />
+    </SlideListItem>
+  );
+});
+
+SlideListItemMemo.displayName = 'SlideListItemMemo';
+
 const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
   const hasSlides = html && html.trim().length > 0;
 
@@ -219,21 +330,39 @@ const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
     iframeRef.current.style.setProperty('--scale-factor', scale.toString());
   };
 
-  const slidesMeta = useMemo(() => {
-    if (!hasSlides) return [] as { index: number; title: string }[];
+  // Stable slide metadata that only updates when slide count changes
+  const [slidesMeta, setSlidesMeta] = useState<{ index: number; title: string }[]>([]);
+  const [lastSlideCount, setLastSlideCount] = useState(0);
+
+  // Update slides metadata only when slide count changes
+  useEffect(() => {
+    if (!hasSlides) {
+      setSlidesMeta([]);
+      setLastSlideCount(0);
+      return;
+    }
+
     try {
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, 'text/html');
       const sections = Array.from(doc.querySelectorAll('.reveal .slides section'));
-      return sections.map((section, i) => {
-        const heading = section.querySelector('h1, h2, h3');
-        const title = (heading?.textContent || '').trim() || `Slide ${i + 1}`;
-        return { index: i, title };
-      });
+      const currentSlideCount = sections.length;
+      
+      // Only update if slide count changed
+      if (currentSlideCount !== lastSlideCount) {
+        const newSlidesMeta = sections.map((section, i) => {
+          const heading = section.querySelector('h1, h2, h3');
+          const title = (heading?.textContent || '').trim() || `Slide ${i + 1}`;
+          return { index: i, title };
+        });
+        setSlidesMeta(newSlidesMeta);
+        setLastSlideCount(currentSlideCount);
+      }
     } catch {
-      return [] as { index: number; title: string }[];
+      setSlidesMeta([]);
+      setLastSlideCount(0);
     }
-  }, [html, hasSlides]);
+  }, [html, hasSlides, lastSlideCount]);
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -261,25 +390,41 @@ const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, [hasSlides, html]);
 
-  const gotoSlide = (index: number) => {
-    setActiveIndex(index);
-    try {
-      iframeRef.current?.contentWindow?.postMessage({ type: 'NAVIGATE_TO', index }, '*');
-    } catch {}
-  };
+  const gotoSlide = useCallback((index: number) => {
+    // Only update if the index is different from current active index
+    if (index !== activeIndex) {
+      setActiveIndex(index);
+      try {
+        iframeRef.current?.contentWindow?.postMessage({ type: 'NAVIGATE_TO', index }, '*');
+      } catch {}
+    }
+  }, [activeIndex]);
 
-  // When HTML changes, reset to first slide and try to navigate once the frame is ready
+  // Only reset to first slide when slides are first created, not on every update
   useEffect(() => {
     if (!hasSlides) return;
-    setActiveIndex(0);
-    // Slight delay to allow iframe to mount its scripts
-    const id = window.setTimeout(() => {
+    
+    // Only reset to first slide if we don't have any slides yet or if this is a completely new deck
+    if (slidesMeta.length === 0) {
+      setActiveIndex(0);
+      // Slight delay to allow iframe to mount its scripts
+      const id = window.setTimeout(() => {
+        try {
+          iframeRef.current?.contentWindow?.postMessage({ type: 'NAVIGATE_TO', index: 0 }, '*');
+        } catch {}
+      }, 150);
+      return () => window.clearTimeout(id);
+    }
+    
+    // If the current active index is beyond the available slides, reset to last slide
+    if (activeIndex >= slidesMeta.length && slidesMeta.length > 0) {
+      const newIndex = slidesMeta.length - 1;
+      setActiveIndex(newIndex);
       try {
-        iframeRef.current?.contentWindow?.postMessage({ type: 'NAVIGATE_TO', index: 0 }, '*');
+        iframeRef.current?.contentWindow?.postMessage({ type: 'NAVIGATE_TO', index: newIndex }, '*');
       } catch {}
-    }, 150);
-    return () => window.clearTimeout(id);
-  }, [html, hasSlides]);
+    }
+  }, [hasSlides, slidesMeta.length, activeIndex]);
 
   return (
     <ViewerContainer>
@@ -288,31 +433,13 @@ const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
           <SlideListPanel>
             <SlideList>
               {slidesMeta.map(s => (
-                <SlideListItem key={s.index} $active={s.index === activeIndex} onClick={() => gotoSlide(s.index)}>
-                  <SlideTitleRow>
-                    <SlideIndex>{s.index + 1}</SlideIndex>
-                    <SlideTitle>{s.title}</SlideTitle>
-                  </SlideTitleRow>
-                  <ThumbBox>
-                    <ThumbFrame
-                      srcDoc={`<html><head><style>html,body{margin:0;height:100%;overflow:hidden} .reveal{height:100vh} .reveal .slides{height:100%}</style>
-<script>try{location.hash='#/${s.index}';}catch(e){}</script></head><body>${html}
-<script>(function(){
-  var desired=${s.index};
-  function go(){
-    try{var d=window.__DECK__; if(d && typeof d.slide==='function'){d.slide(desired,0,0); return true;}}catch(e){}
-    return false;
-  }
-  if(!go()){
-    var iv=setInterval(function(){ if(go()) clearInterval(iv); }, 100);
-    setTimeout(function(){clearInterval(iv);}, 5000);
-  }
-})();</script>
-</body></html>`}
-                      sandbox="allow-scripts allow-same-origin"
-                    />
-                  </ThumbBox>
-                </SlideListItem>
+                <SlideListItemMemo
+                  key={s.index}
+                  slide={s}
+                  activeIndex={activeIndex}
+                  html={html}
+                  onGotoSlide={gotoSlide}
+                />
               ))}
             </SlideList>
           </SlideListPanel>

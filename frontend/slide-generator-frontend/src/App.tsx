@@ -221,6 +221,7 @@ const App: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const refreshAbortRef = useRef<AbortController | null>(null);
   const refreshDebounceRef = useRef<any>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   const runRefresh = async () => {
     // cancel any in-flight request
@@ -241,6 +242,7 @@ const App: React.FC = () => {
     } finally {
       clearTimeout(safety);
       setIsRefreshing(false);
+      setRefreshTick(prev => prev + 1); // notify ChatInterface to sync messages
     }
   };
 
@@ -307,7 +309,7 @@ const App: React.FC = () => {
         <MainContent>
           <ChatSection>
             <SectionTitle>Slide Creation Assistant</SectionTitle>
-            <ChatInterface onSlideUpdate={refreshSlides} />
+            <ChatInterface onSlideUpdate={refreshSlides} refreshTick={refreshTick} />
           </ChatSection>
           
           <SlideSection>

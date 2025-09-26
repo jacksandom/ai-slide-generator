@@ -13,6 +13,7 @@ interface ChatMessage {
 
 interface ChatInterfaceProps {
   onSlideUpdate: () => void;
+  refreshTick?: number; // external trigger to refresh messages (e.g., after manual slide refresh)
 }
 
 const ChatContainer = styled.div`
@@ -301,7 +302,7 @@ interface ToolGroup {
   isExpanded: boolean;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate, refreshTick }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('Please provide a pitch deck about you');
   const [isLoading, setIsLoading] = useState(false);
@@ -364,10 +365,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
         setTimeout(() => {
           try { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); } catch {}
         }, 0);
-        // Refresh slides only when a tool result message lands
-        const last = cleaned[cleaned.length - 1];
-        const shouldRefresh = !!last?.metadata?.title && /tool result/i.test(last.metadata.title);
-        if (shouldRefresh) onSlideUpdate();
+        // Refresh slides when ANY new message in this batch is a tool result
+        const delta = (newMessages as ChatMessage[]).slice(lastMessageCount);
+        const hasToolResult = delta.some(m => !!m?.metadata?.title && /tool result/i.test(m.metadata!.title!));
+        if (hasToolResult) onSlideUpdate();
+        
+        // Stop polling when generation is complete (consider ONLY new messages in this batch)
+        const done = delta.some(m => (m.metadata?.title || '').toLowerCase() === 'done' || /all set\b/i.test(m.content || ''));
+        if (done && pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+        
         setIsLoading(false); // hide spinner once we see progress
       }
 
@@ -411,6 +420,24 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
       }
     };
   }, []);
+
+  // One-shot refresh of messages when external refreshTick changes (e.g., user clicked Refresh button)
+  useEffect(() => {
+    const fetchOnce = async () => {
+      try {
+        const statusResponse = await axios.get('http://localhost:8000/chat/status/default');
+        setMessages([...statusResponse.data.messages]);
+        setLastMessageCount(statusResponse.data.message_count);
+        setTimeout(() => {
+          try { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); } catch {}
+        }, 0);
+      } catch (err) {
+        // ignore
+      }
+    };
+    if (typeof refreshTick === 'number') fetchOnce();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTick]);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;

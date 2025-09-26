@@ -44,11 +44,10 @@ def get_logo_base64():
         print(f"Warning: Logo file not found at {logo_path}")
         return ""
 
-# Initialize chatbot and conversation state with EY-Parthenon branding
+# Initialize chatbot and conversation state with neutral branding (no EY watermark)
 ey_theme = html_slides.SlideTheme(
-    bottom_right_logo_url="data:image/svg+xml;base64," + get_logo_base64(),
-    bottom_right_logo_height_px=50,
-    bottom_right_logo_margin_px=20
+    bottom_right_logo_url=None,
+    footer_text=None
 )
 html_deck = html_slides.HtmlDeck(theme=ey_theme)
 chatbot_instance = chatbot.Chatbot(
@@ -1828,6 +1827,251 @@ def _run_demo_flow(session_id: str) -> None:
     except Exception as e:
         _append_api_message(session_id, role="assistant", content=f"Demo flow error: {e}")
 
+def _run_prism_flow(session_id: str) -> None:
+    try:
+        global html_deck, chatbot_instance
+        html_deck = html_slides.HtmlDeck(theme=ey_theme)
+        chatbot_instance.html_deck = html_deck
+
+        PRISM_SLIDES: List[str] = [
+            """<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"/><meta content=\"width=device-width, initial-scale=1.0\" name=\"viewport\"/><title>Project Prism - The Opportunity</title><link href=\"https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css\" rel=\"stylesheet\"/><link href=\"https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css\" rel=\"stylesheet\"/><link href=\"https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap\" rel=\"stylesheet\"/><style>body{font-family:'Roboto',sans-serif;background-color:white;color:#1A365D;margin:0;padding:0}.slide-container{width:1280px;min-height:720px;overflow:hidden;position:relative}.header{padding:40px 60px 20px}.content{padding:0 60px}.opportunity-icon{color:#FF5722;font-size:48px;margin-bottom:20px}.cost-icon{color:#FF5722;font-size:48px;margin-bottom:20px}.separator{width:2px;background-color:#E2E8F0;height:400px}.accent-text{color:#FF5722;font-weight:500}</style></head><body><div class=\"slide-container\"><div class=\"header\"><h1 class=\"text-3xl font-bold\">The Opportunity: AI Slide Generation for Consulting</h1></div><div class=\"content\"><div class=\"flex justify-between items-start\"><div class=\"w-1/2 pr-10\"><div class=\"opportunity-icon\"><i class=\"fas fa-lightbulb\"></i></div><h2 class=\"text-xl font-semibold mb-4\">Transforming Slide Creation for Consulting</h2><p class=\"mb-4\">Imagine if consulting firms could <span class=\"accent-text\">instantly create tailored, secure slides</span> from proprietary know-how &amp; sensitive client data—<span class=\"accent-text\">automagically</span>.</p><ul class=\"list-disc pl-5 space-y-2\"><li>Leverage existing firm knowledge bases and client data</li><li>Maintain security and compliance across all materials</li><li>Generate high-quality slides that align with firm branding</li></ul><p class=\"mt-4\">Unlocking immediate value for industry leaders:</p><div class=\"flex space-x-4 mt-2\"><span class=\"font-semibold\">EY</span><span class=\"font-semibold\">KPMG</span><span class=\"font-semibold\">BCG</span><span class=\"font-semibold\">+ more</span></div></div><div class=\"separator mx-8\"></div><div class=\"w-1/2 pl-10\"><div class=\"cost-icon\"><i class=\"fas fa-chart-line\"></i></div><h2 class=\"text-xl font-semibold mb-4\">The Cost of Manual Slide Creation</h2><div class=\"mb-4\"><span class=\"text-4xl font-bold accent-text\">4 hours</span><span class=\"text-xl ml-2\">spent daily on slide creation</span></div><div class=\"bg-gray-50 p-4 rounded-lg mb-4\"><p class=\"font-semibold mb-2\">Impact per consultant:</p><table class=\"w-full\"><tr><td>Daily hours on slides:</td><td class=\"text-right\">4 hours</td></tr><tr><td>Average billing rate:</td><td class=\"text-right\">$300/hour</td></tr><tr class=\"border-t border-gray-300\"><td class=\"font-semibold\">Daily cost:</td><td class=\"text-right font-semibold\">$1,200</td></tr><tr><td class=\"font-semibold\">Annual cost (250 days):</td><td class=\"text-right font-semibold\">$300,000</td></tr></table></div><p class=\"mt-4\"><span class=\"accent-text font-semibold\">Project Prism</span> converts wasted hours into billable client value—increasing impact and profitability.</p></div></div></div></div></body></html>""",
+            """<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"/><meta content=\"width=device-width, initial-scale=1.0\" name=\"viewport\"/><title>Project Prism Architecture</title><link href=\"https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css\" rel=\"stylesheet\"/><link href=\"https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css\" rel=\"stylesheet\"/><link href=\"https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap\" rel=\"stylesheet\"/><style>body{font-family:'Roboto',sans-serif;background-color:white;color:#1A365D;margin:0;padding:0}.slide-container{width:1280px;min-height:720px;overflow:hidden;position:relative}.header{padding:40px 60px 20px}.content{padding:0 60px}.arch-box{border:2px solid #FF5722;border-radius:8px;background-color:#FFF5F2;padding:15px;position:relative}.arch-box-inner{border:1px solid #FF5722;border-radius:4px;background-color:white;padding:10px;margin:5px 0}.arrow{color:#FF5722;position:absolute;font-size:20px}.arrow-right:before{content:\"\\f061\";font-family:\"Font Awesome 5 Free\";font-weight:900}.arrow-down:before{content:\"\\f063\";font-family:\"Font Awesome 5 Free\";font-weight:900}.arrow-up:before{content:\"\\f062\";font-family:\"Font Awesome 5 Free\";font-weight:900}.icon-box{color:#FF5722;font-size:24px;margin-bottom:10px}</style></head><body><div class=\"slide-container\"><div class=\"header\"><h1 class=\"text-3xl font-bold\">Project Prism Architecture</h1></div><div class=\"content\"><div class=\"flex flex-col items-center\"><div class=\"arch-box w-64 mb-8\"><div class=\"icon-box text-center\"><i class=\"fas fa-users\"></i></div><div class=\"text-center font-semibold mb-2\">Users</div><div class=\"text-sm text-center\">Natural language prompts for slide generation</div></div><div class=\"h-10 flex justify-center items-center\"><i class=\"fas fa-arrow-down text-orange-500\"></i></div><div class=\"arch-box w-3/4 mb-8\"><div class=\"icon-box text-center\"><i class=\"fas fa-desktop\"></i></div><div class=\"text-center font-semibold mb-2\">Project Prism App Interface</div><div class=\"flex justify-around\"><div class=\"arch-box-inner text-center w-1/4\"><div class=\"text-sm font-medium\">Interactive Editor</div></div><div class=\"arch-box-inner text-center w-1/4\"><div class=\"text-sm font-medium\">Review Pane</div></div><div class=\"arch-box-inner text-center w-1/4\"><div class=\"text-sm font-medium\">Export</div></div></div></div><div class=\"h-10 flex justify-center items-center\"><i class=\"fas fa-arrow-down text-orange-500\"></i></div><div class=\"arch-box w-3/4 mb-8\"><div class=\"icon-box text-center\"><i class=\"fas fa-brain\"></i></div><div class=\"text-center font-semibold\">LLM Content Creator</div><div class=\"text-sm text-center\">Intelligent content generation and orchestration</div></div><div class=\"h-10 flex justify-center items-center\"><i class=\"fas fa-arrow-down text-orange-500\"></i></div><div class=\"flex w-full justify-between mb-8\"><div class=\"arch-box w-5/12\"><div class=\"icon-box text-center\"><i class=\"fas fa-tools\"></i></div><div class=\"text-center font-semibold mb-2\">Agents / Tools</div><div class=\"grid grid-cols-2 gap-2\"><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">RAG</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">SQL</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">Data Viz</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">Iconographer</div></div><div class=\"arch-box-inner text-center col-span-2\"><div class=\"text-sm font-medium\">Web Search</div></div></div></div><div class=\"arch-box w-5/12\"><div class=\"icon-box text-center\"><i class=\"fas fa-file-powerpoint\"></i></div><div class=\"text-center font-semibold mb-2\">Slide Creation Framework</div><div class=\"flex flex-col space-y-2\"><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">CSS Theme</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">HTML Deck Manager</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">Export Manager</div></div><div class=\"flex items-center\"><div class=\"flex-grow h-0.5 bg-gray-300\"></div><div class=\"px-2 text-gray-500 text-xs\">connects to</div><div class=\"flex-grow h-0.5 bg-gray-300\"></div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">Lakebase State Machine</div></div></div></div></div></div></body></html>""",
+            """<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Key Benefits for Consulting Firms</title>
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet"/>
+<link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap" rel="stylesheet"/>
+<style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: white;
+            color: #1A365D;
+            margin: 0;
+            padding: 0;
+        }
+        .slide-container {
+            width: 1280px;
+            min-height: 720px;
+            overflow: hidden;
+            position: relative;
+        }
+        .header {
+            padding: 40px 60px 20px;
+        }
+        .content {
+            padding: 0 60px 40px;
+        }
+        .icon-circle {
+            width: 64px;
+            height: 64px;
+            border-radius: 32px;
+            background-color: #FFF5F2;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 15px;
+        }
+        .benefit-icon {
+            color: #FF5722;
+            font-size: 28px;
+        }
+        .benefit-box {
+            border: 1px solid #E2E8F0;
+            border-radius: 8px;
+            padding: 25px;
+            background-color: #F8FAFC;
+            height: 100%;
+        }
+        .footer {
+            position: absolute;
+            bottom: 20px;
+            right: 60px;
+            font-size: 14px;
+            color: #718096;
+        }
+    </style>
+</head>
+<body>
+<div class="slide-container">
+<div class="header">
+<h1 class="text-3xl font-bold">Key Benefits for Analysts &amp; Consulting Firms</h1>
+ </div>
+<div class="content">
+<div class="grid grid-cols-3 gap-8">
+<!-- Benefit 1 -->
+<div class="benefit-box flex flex-col items-center text-center">
+<div class="icon-circle">
+<i class="benefit-icon fas fa-clock"></i>
+</div>
+<h3 class="text-xl font-semibold mb-2">Cut Deck Creation Time</h3>
+<p class="text-gray-700">Reduce slide creation time by 75% through AI-powered automation</p>
+</div>
+<!-- Benefit 2 -->
+<div class="benefit-box flex flex-col items-center text-center">
+<div class="icon-circle">
+<i class="benefit-icon fas fa-shield-alt"></i>
+</div>
+<h3 class="text-xl font-semibold mb-2">Enterprise-Grade Security</h3>
+<p class="text-gray-700">Secure access to client data via Databricks Unity Catalog</p>
+</div>
+<!-- Benefit 3 -->
+<div class="benefit-box flex flex-col items-center text-center">
+<div class="icon-circle">
+<i class="benefit-icon fas fa-brain"></i>
+</div>
+<h3 class="text-xl font-semibold mb-2">AI Model Flexibility</h3>
+<p class="text-gray-700">Choose AI models based on specific use cases and requirements</p>
+</div>
+<!-- Benefit 4 -->
+<div class="benefit-box flex flex-col items-center text-center">
+<div class="icon-circle">
+<i class="benefit-icon fas fa-database"></i>
+</div>
+<h3 class="text-xl font-semibold mb-2">Automated Data Warehousing</h3>
+<p class="text-gray-700">Convert natural language to SQL for seamless data analysis</p>
+</div>
+<!-- Benefit 5 -->
+<div class="benefit-box flex flex-col items-center text-center">
+<div class="icon-circle">
+<i class="benefit-icon fas fa-check-circle"></i>
+</div>
+<h3 class="text-xl font-semibold mb-2">Consistent Quality</h3>
+<p class="text-gray-700">Align perfectly with firm-native templates and branding</p>
+</div>
+<!-- Benefit 6 -->
+<div class="benefit-box flex flex-col items-center text-center">
+<div class="icon-circle">
+<i class="benefit-icon fas fa-handshake"></i>
+</div>
+<h3 class="text-xl font-semibold mb-2">Client Trust</h3>
+<p class="text-gray-700">Deliver high-quality materials that strengthen relationships</p>
+</div>
+</div>
+</div>
+<div class="footer">
+            Project Prism | Databricks Confidential 2025
+        </div>
+</div>
+</body>
+</html>""",
+            """<html><body style='font-family:Arial'><div style='width:1280px;height:720px;display:flex;align-items:center;justify-content:center'><h1>Slide 4 (placeholder)</h1></div></body></html>""",
+            """<!DOCTYPE html>
+
+<html lang=\"en\">
+<head>
+<meta charset=\"utf-8\"/>
+<meta content=\"width=device-width, initial-scale=1.0\" name=\"viewport\"/>
+<title>What Sets Project Prism Apart</title>
+<link href=\"https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css\" rel=\"stylesheet\"/>
+<link href=\"https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css\" rel=\"stylesheet\"/>
+<link href=\"https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap\" rel=\"stylesheet\"/>
+<style>
+        body { font-family: 'Roboto', sans-serif; background-color: white; color: #1A365D; margin: 0; padding: 0; }
+        .slide-container { width: 1280px; min-height: 720px; overflow: hidden; position: relative; }
+        .header { padding: 40px 60px 20px; }
+        .content { padding: 0 60px 40px; }
+        .icon-shield { width: 80px; height: 80px; border-radius: 40px; background-color: #FFF5F2; display: flex; align-items: center; justify-content: center; margin-bottom: 20px; }
+        .advantage-icon { color: #FF5722; font-size: 32px; }
+        .advantage-card { border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; background-color: #F8FAFC; height: 100%; transition: transform 0.2s; }
+        .advantage-card:hover { transform: translateY(-5px); }
+        .accent-text { color: #FF5722; font-weight: 500; }
+    </style>
+</head>
+<body>
+<div class=\"slide-container\">
+<div class=\"header\">
+<h1 class=\"text-3xl font-bold\">What Sets Project Prism Apart</h1>
+</div>
+<div class=\"content\">
+<div class=\"flex items-center mb-10\">
+<div class=\"icon-shield mr-6\">
+<i class=\"advantage-icon fas fa-shield-alt\"></i>
+</div>
+<div>
+<h2 class=\"text-2xl font-semibold mb-2\">Deep Integration with <span class=\"accent-text\">Databricks Unity Catalog</span></h2>
+<p class=\"text-lg\">The foundation of our enterprise security and governance capabilities</p>
+</div>
+</div>
+<div class=\"grid grid-cols-2 gap-8\">
+<div class=\"advantage-card\">
+<div class=\"flex items-center mb-4\"><div class=\"text-orange-500 mr-3 text-2xl\"><i class=\"fas fa-lock\"></i></div><h3 class=\"text-xl font-semibold\">Enterprise-Grade Security</h3></div>
+<ul class=\"space-y-2 ml-8\">
+<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>End-to-end encryption of sensitive client data</span></li>
+<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Role-based access controls for consultants</span></li>
+<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Fully auditable data access and slide generation</span></li>
+</ul>
+</div>
+<div class=\"advantage-card\">
+<div class=\"flex items-center mb-4\"><div class=\"text-orange-500 mr-3 text-2xl\"><i class=\"fas fa-balance-scale\"></i></div><h3 class=\"text-xl font-semibold\">Complete Governance Framework</h3></div>
+<ul class=\"space-y-2 ml-8\">
+<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Chain of trust for all generated content</span></li>
+<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Compliance with industry regulations</span></li>
+<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Automated documentation of data lineage</span></li>
+</ul>
+</div>
+<div class=\"advantage-card\">
+<div class=\"flex items-center mb-4\"><div class=\"text-orange-500 mr-3 text-2xl\"><i class=\"fas fa-brain\"></i></div><h3 class=\"text-xl font-semibold\">Flexible AI Orchestration</h3></div>
+<ul class=\"space-y-2 ml-8\">
+<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Choice of proprietary or open source models</span></li>
+<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Custom model training on firm knowledge bases</span></li>
+<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Advanced reasoning for complex slides</span></li>
+</ul>
+</div>
+<div class=\"advantage-card\">
+<div class=\"flex items-center mb-4\"><div class=\"text-orange-500 mr-3 text-2xl\"><i class=\"fas fa-network-wired\"></i></div><h3 class=\"text-xl font-semibold\">Built for Enterprise Integration</h3></div>
+<ul class=\"space-y-2 ml-8\">
+<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Seamless connectivity with existing systems</span></li>
+<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Designed for regulated environments</span></li>
+<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Scales with organizational needs</span></li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>""",
+        ]
+
+        TITLES = ["The Opportunity", "Architecture", "Key Benefits", "Placeholder", "What Sets Prism Apart"]
+
+        # Share high-level plan
+        plan_lines = [f"{idx+1}) {title}" for idx, title in enumerate(TITLES)]
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content=(
+                "Plan: I'll generate a concise 5-slide deck in this order:\n\n"
+                + "\n".join(plan_lines)
+            ),
+            metadata={"title": "Plan"}
+        )
+
+        for i in range(5):
+            title = TITLES[i]
+            # Announce what we're doing
+            _append_api_message(session_id, role="assistant", content=f"Planning slide {i+1}: {title}…")
+            # Realistic single tool usage message for refresh hook
+            _append_api_message(session_id, role="assistant", content="Using HTML Deck Manager to render slide…", metadata={"title": "🔧 Using a tool"})
+            time.sleep(0.9)
+            html_deck.add_custom_html_slide(PRISM_SLIDES[i], title="", subtitle="")
+            # Provide hint for next slide BEFORE the tool result so tool result is last
+            if i < 4:
+                _append_api_message(session_id, role="assistant", content=f"Next: Slide {i+2} – {TITLES[i+1]}")
+                time.sleep(0.1)
+            # Trigger frontend refresh (ChatInterface listens for 'tool result')
+            _append_api_message(session_id, role="assistant", content=f"✅ Slide {i+1} ready: {title}", metadata={"title": "🔧 Tool result"})
+
+        outline = "\n".join([f"{i+1}) {TITLES[i]}" for i in range(5)])
+        _append_api_message(session_id, role="assistant", content=f"All set. Here's your deck outline:\n\n{outline}")
+        # Signal completion explicitly so the frontend can stop polling
+        _append_api_message(session_id, role="assistant", content="Generation complete.", metadata={"title": "Done"})
+    except Exception as e:
+        _append_api_message(session_id, role="assistant", content=f"Demo flow error: {e}")
 # Pydantic models for API requests/responses
 class ChatMessage(BaseModel):
     role: str
@@ -1921,7 +2165,7 @@ async def chat(request: ChatRequest):
             # Minimal transcript: add user only, then stream demo steps asynchronously
             update_conversations_with_openai_message(session_id, {"role": "user", "content": user_input})
             import threading
-            t = threading.Thread(target=_run_demo_flow, args=(session_id,))
+            t = threading.Thread(target=_run_prism_flow, args=(session_id,))
             t.daemon = True
             t.start()
             conv = get_or_create_conversation(session_id)

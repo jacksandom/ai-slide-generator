@@ -1887,13 +1887,7 @@ def _run_prism_flow(session_id: str) -> None:
             background-color: #F8FAFC;
             height: 100%;
         }
-        .footer {
-            position: absolute;
-            bottom: 20px;
-            right: 60px;
-            font-size: 14px;
-            color: #718096;
-        }
+        
     </style>
 </head>
 <body>
@@ -1953,9 +1947,7 @@ def _run_prism_flow(session_id: str) -> None:
 </div>
 </div>
 </div>
-<div class="footer">
-            Project Prism | Databricks Confidential 2025
-        </div>
+        
 </div>
 </body>
 </html>""",

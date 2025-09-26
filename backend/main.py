@@ -17,7 +17,14 @@ import time
 import sys
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
-from slide_generator.tools import html_slides, uc_tools
+from slide_generator.tools import html_slides
+# Make UC tools optional to allow backend to start without unitycatalog/databricks-connect
+try:
+    from slide_generator.tools import uc_tools  # type: ignore
+    TOOL_DICT = uc_tools.UC_tools
+except Exception:
+    print("Warning: UC tools not available; starting without UC_tools.")
+    TOOL_DICT = {}
 from slide_generator.core import chatbot
 from slide_generator.config import config
 from databricks.sdk import WorkspaceClient
@@ -48,7 +55,7 @@ chatbot_instance = chatbot.Chatbot(
     html_deck=html_deck,
     llm_endpoint_name=config.llm_endpoint,
     ws=ws,
-    tool_dict=uc_tools.UC_tools
+    tool_dict=TOOL_DICT
 )
 
 # Initialize FastAPI app
@@ -2018,12 +2025,16 @@ async def reset_slides():
         # Create new deck with same theme
         global html_deck, chatbot_instance
         html_deck = html_slides.HtmlDeck(theme=ey_theme)
-        chatbot_instance = chatbot.Chatbot(
-            html_deck=html_deck,
-            llm_endpoint_name=config.llm_endpoint,
-            ws=ws,
-            tool_dict=uc_tools.UC_tools
-        )
+        # Reattach to existing chatbot if available; avoid re-importing UC tools
+        if chatbot_instance is not None:
+            chatbot_instance.html_deck = html_deck
+        else:
+            chatbot_instance = chatbot.Chatbot(
+                html_deck=html_deck,
+                llm_endpoint_name=config.llm_endpoint,
+                ws=ws,
+                tool_dict=TOOL_DICT
+            )
         return {"message": "Slides reset successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error resetting slides: {str(e)}")

@@ -303,7 +303,7 @@ interface ToolGroup {
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputValue, setInputValue] = useState('Please provide a comprehensive commercial due diligence report on the following company: Heineken');
+  const [inputValue, setInputValue] = useState('Please provide a pitch deck about you');
   const [isLoading, setIsLoading] = useState(false);
   const [lastMessageCount, setLastMessageCount] = useState(0);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
@@ -563,7 +563,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder="Please provide a comprehensive commercial due diligence report on the following company: Heineken"
+          placeholder="Please provide a pitch deck about you"
           disabled={isLoading}
         />
         <SendButton onClick={handleSendMessage} disabled={isLoading || !inputValue.trim()} aria-label="Send" className="v-btn v-btn--elevated v-btn--icon bg-primary">

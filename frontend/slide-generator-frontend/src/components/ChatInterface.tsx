@@ -154,8 +154,14 @@ const ToolHeader = styled.button<{ $isExpanded: boolean }>`
   justify-content: space-between;
   font-size: 13px;
   font-weight: 600;
-  color: #1A9AFA;
+  color: #ff3b2e;
   transition: background-color 0.2s;
+  outline: none;
+
+  &:focus, &:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
 
   &:hover {
     background: #f1f5f9;
@@ -214,9 +220,19 @@ const TextInput = styled.textarea`
   line-height: 1.5;
 
   &:focus {
-    border-color: #1A9AFA;
-    box-shadow: 0 0 0 3px rgba(26, 154, 250, 0.1);
+    border-color: #cbd5e1; /* neutral focus */
+    box-shadow: none !important; /* remove blue outline glow */
+    outline: none !important;
   }
+
+  &:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+    border-color: #cbd5e1;
+  }
+
+  &::-moz-focus-inner { border: 0; }
+  -webkit-tap-highlight-color: transparent;
 
   &::placeholder {
     color: #9ca3af;
@@ -224,26 +240,41 @@ const TextInput = styled.textarea`
 `;
 
 const SendButton = styled.button`
-  padding: 14px 16px;
-  background: #1A9AFA;
-  color: white;
+  width: 44px;
+  height: 44px;
   border: none;
-  border-radius: 12px;
+  border-radius: 9999px;
   cursor: pointer;
-  font-weight: 600;
-  font-size: 16px;
-  transition: background-color 0.2s;
-  align-self: flex-end;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  align-self: flex-end;
+  outline: none;
+  position: relative;
+  background: var(--dbx-primary, #ff3b2e); /* vivid orange-red */
+  color: white;
+  box-shadow: 0 6px 14px rgba(0,0,0,0.18);
+  transition: transform .06s ease-in-out, filter .15s ease-in-out, box-shadow .15s ease-in-out;
 
   &:hover:not(:disabled) {
-    background: #1680D4;
+    box-shadow: 0 12px 24px rgba(0,0,0,0.26); /* shadow only on hover */
   }
 
+  &:active:not(:disabled) {
+    transform: translateY(1px);
+    background: var(--dbx-primary, #ff3b2e); /* same color on click */
+  }
+
+  /* Remove blue focus ring across browsers */
+  &:focus, &:focus-visible {
+    outline: none !important;
+    box-shadow: 0 6px 14px rgba(0,0,0,0.18);
+  }
+  &::-moz-focus-inner { border: 0; }
+  -webkit-tap-highlight-color: transparent;
+
   &:disabled {
-    background: #9ca3af;
+    opacity: .6;
     cursor: not-allowed;
   }
 `;
@@ -459,7 +490,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
               🔧 AI Tools Used ({toolCount} operations)
               {hasRequests && hasResults && ' - Requests & Results'}
             </span>
-            <ToolIcon $isExpanded={isExpanded}>▶</ToolIcon>
+            <ToolIcon $isExpanded={isExpanded} style={{ color: '#ff3b2e' }}>▶</ToolIcon>
           </ToolHeader>
           <ToolContent $isExpanded={isExpanded}>
             {toolGroup.messages.map((msg, idx) => {
@@ -535,8 +566,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate }) => {
           placeholder="Please provide a comprehensive commercial due diligence report on the following company: Heineken"
           disabled={isLoading}
         />
-        <SendButton onClick={handleSendMessage} disabled={isLoading || !inputValue.trim()}>
-          {isLoading ? '⏳' : '➤'}
+        <SendButton onClick={handleSendMessage} disabled={isLoading || !inputValue.trim()} aria-label="Send" className="v-btn v-btn--elevated v-btn--icon bg-primary">
+          <span className="v-btn__overlay" />
+          <span className="v-btn__underlay" />
+          <span className="v-btn__content" data-no-activator="">
+            {isLoading ? (
+              '⏳'
+            ) : (
+              <i className="mdi mdi-send v-icon" aria-hidden="true"></i>
+            )}
+          </span>
         </SendButton>
       </InputContainer>
     </ChatContainer>

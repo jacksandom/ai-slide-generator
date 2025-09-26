@@ -12,6 +12,8 @@ const EY_GREY2 = '#C4C4CD';
 const EY_BLACK = '#2E2E38';
 const EY_WHITE = '#FFFFFF';
 const DARK_GRAY = '#333333';
+// Ribbon color (aligned with screenshot)
+const RIBBON_BG = '#1F333B';
 
 const AppContainer = styled.div`
   height: 100vh;
@@ -36,7 +38,7 @@ const ContentWrapper = styled.div`
 `;
 
 const Header = styled.div`
-  background: ${EY_BLACK};
+  background: ${RIBBON_BG};
   color: ${EY_WHITE};
   padding: 12px 20px 8px 20px;
   text-align: left;
@@ -53,7 +55,7 @@ const Ribbon = styled.div`
 const Brand = styled.div`
   display: flex;
   align-items: center;
-  gap: 20px; /* add more space between logo and title */
+  gap: 18px; /* add spacing between databricks logo and title */
 `;
 
 const LogoBox = styled.div`
@@ -92,10 +94,11 @@ const EYParthenonLogo: React.FC = () => (
 
 const Title = styled.h1`
   margin: 0;
-  font-size: 1.2rem;
-  font-weight: 600;
+  font-size: 1.6rem; /* larger, like the screenshot */
+  font-weight: 600;  /* semi-bold */
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-  margin-left: 6px; /* nudge slightly to the right */
+  letter-spacing: 0.2px;
+  margin-left: 0; /* align flush left like screenshot */
 `;
 
 const Actions = styled.div`
@@ -105,7 +108,7 @@ const Actions = styled.div`
 `;
 
 const PartnerLogo = styled.img`
-  height: 20px;
+  height: 24px; /* slightly larger for the white one-color wordmark */
   display: block;
   max-width: 140px;
 `;
@@ -114,34 +117,31 @@ const PrimaryButton = styled.button`
   appearance: none;
   border: none;
   background: transparent;
-  color: ${EY_WHITE};
+  color: #E6EDF1; /* light grey text like Databricks */
   padding: 8px 12px;
-  border-radius: 12px;
-  font-size: 0.9rem;
-  font-weight: normal;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease-in-out;
-  position: relative;
+  transition: background-color 0.15s ease-in-out, color 0.15s ease-in-out, transform 0.06s ease-in-out;
   outline: none;
-  
-  &:focus {
-    outline: none;
-  }
-  
+  box-shadow: none;
+  -webkit-tap-highlight-color: transparent;
+
   &:hover {
-    &::after {
-      content: '';
-      position: absolute;
-      bottom: -2px;
-      left: 0;
-      right: 0;
-      height: 2px;
-      background: ${EY_BLUE};
-    }
+    background: rgba(255, 255, 255, 0.08); /* subtle hover chip */
+    color: #F1F5F9;
   }
-  
+
   &:active {
-    color: ${EY_BLUE};
+    background: rgba(255, 255, 255, 0.14);
+    color: #FFFFFF;
+    transform: translateY(1px);
+  }
+
+  &:focus, &:focus-visible {
+    outline: none;
+    box-shadow: none;
   }
 `;
 
@@ -289,17 +289,14 @@ const App: React.FC = () => {
         <Header>
           <Ribbon>
             <Brand>
-              <LogoBox>
-                <EYParthenonLogo />
-              </LogoBox>
+              <PartnerLogo
+                src="https://cdn.bfldr.com/9AYANS2F/at/n8vj68cs4fwqfh3x363vsc/primary-lockup-one-color-white-rgb.svg?auto=webp"
+                alt="Databricks"
+                onError={(e) => (e.currentTarget.style.display = 'none')}
+              />
               <Title>AI Slide Generator</Title>
             </Brand>
             <Actions>
-              <PartnerLogo
-                src="https://cdn.bfldr.com/9AYANS2F/at/9wpgrcfzpk398zww8zj72hws/small-scale-lockup-full-color-white-rgb.svg?auto=webp"
-                alt="Databricks Logo"
-                onError={(e) => (e.currentTarget.style.display = 'none')}
-              />
               <PrimaryButton onClick={refreshSlides}>Refresh</PrimaryButton>
               <PrimaryButton onClick={exportSlides}>Download</PrimaryButton>
               <PrimaryButton onClick={resetSlides}>Reset</PrimaryButton>

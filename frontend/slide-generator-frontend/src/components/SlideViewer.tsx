@@ -45,8 +45,8 @@ const SlideList = styled.div`
 
 const SlideListItem = styled.button<{ $active?: boolean }>`
   text-align: left;
-  border: 1px solid ${props => (props.$active ? '#1A9AFA' : '#e5e7eb')};
-  background: ${props => (props.$active ? 'rgba(26, 154, 250, 0.06)' : '#fafafa')};
+  border: 1px solid ${props => (props.$active ? '#ff3b2e' : '#e5e7eb')};
+  background: ${props => (props.$active ? 'rgba(255, 59, 46, 0.06)' : '#fafafa')};
   color: #111827;
   border-radius: 8px;
   padding: 6px 6px 8px 6px;
@@ -57,6 +57,7 @@ const SlideListItem = styled.button<{ $active?: boolean }>`
   align-items: stretch;
   gap: 4px;
   &:hover { background: #f3f4f6; }
+  &:focus, &:focus-visible { outline: none; box-shadow: none; }
 `;
 
 const SlideIndex = styled.span`

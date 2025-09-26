@@ -201,7 +201,7 @@ const SlideSection = styled.div`
   min-height: 0;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
   border-radius: 16px;
-  margin: 8px 8px 8px 4px; /* reclaim a few pixels on the right */
+  margin: 8px; /* align with colleague's uniform margin */
 `;
 
 const SectionTitle = styled.h2`

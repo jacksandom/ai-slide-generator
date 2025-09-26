@@ -233,9 +233,9 @@ class SlideTheme:
         
         /* Slide containers - perfect alignment with padding */
         .slide-container {{
-          width: 1280px !important;
-          height: 720px !important;
-          margin: 0 !important;
+          width: 1280px !important; 
+          height: 720px !important; 
+          margin: 0 !important; 
           padding: 24px !important;
           position: relative;
           box-sizing: border-box;

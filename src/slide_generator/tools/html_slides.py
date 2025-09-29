@@ -203,8 +203,8 @@ ws = WorkspaceClient(profile='e2-demo', product='slide-generator')
 model_serving_client = ws.serving_endpoints.get_open_ai_client()
 
 # LLM endpoint names
-NLU_ENDPOINT = "databricks-claude-sonnet-4"
-PLAN_ENDPOINT = "databricks-claude-sonnet-4" 
+NLU_ENDPOINT = "databricks-gpt-oss-120b"
+PLAN_ENDPOINT = "databricks-gpt-oss-120b" 
 HTML_ENDPOINT = "databricks-claude-sonnet-4"
 
 # =========================
@@ -233,6 +233,31 @@ def interpret_utterance(messages: List[Dict[str, str]], current_config: Extracte
     content = response.choices[0].message.content
     print(f"NLU response: {content}")
     
+    # Handle new response format (list of dictionaries)
+    if isinstance(content, list):
+        # Extract JSON text from the list structure
+        json_text = None
+        for item in content:
+            if isinstance(item, dict) and item.get('type') == 'text':
+                json_text = item.get('text', '')
+                break
+        
+        if json_text:
+            content = json_text
+        else:
+            # Fallback: try to find any text content
+            for item in content:
+                if isinstance(item, dict) and 'text' in item:
+                    content = item['text']
+                    break
+            else:
+                # Last resort: convert to string
+                content = str(content)
+    
+    # Ensure content is a string
+    if not isinstance(content, str):
+        content = str(content)
+    
     # Strip markdown code fences if present
     if content.startswith("```json"):
         content = content[7:]  # Remove ```json
@@ -248,6 +273,72 @@ def interpret_utterance(messages: List[Dict[str, str]], current_config: Extracte
     valid_intents = ["REQUEST_DECK", "REFINE_CONFIG", "ADD_CHANGES", "REGENERATE_TODOS", "FINALIZE", "SAVE", "SHOW_STATUS"]
     if data.get("intent") not in valid_intents:
         data["intent"] = "REQUEST_DECK"  # Default fallback
+    
+    # Handle config_deltas (plural) -> config_delta (singular)
+    if "config_deltas" in data and "config_delta" not in data:
+        data["config_delta"] = data.pop("config_deltas")
+    
+    # Handle changes parsing - convert various formats to Change objects
+    if "changes" in data:
+        parsed_changes = []
+        
+        # Handle case where changes is a dict instead of a list
+        if isinstance(data["changes"], dict):
+            # Handle format like {'slide': 1, 'actions': [...]}
+            if "slide" in data["changes"] and "actions" in data["changes"]:
+                slide_id = data["changes"]["slide"]
+                actions = data["changes"]["actions"]
+                if isinstance(actions, list):
+                    for action in actions:
+                        parsed_changes.append({
+                            "slide_id": slide_id,
+                            "op": "EDIT_RAW_HTML",
+                            "args": {"description": action}
+                        })
+                else:
+                    parsed_changes.append({
+                        "slide_id": slide_id,
+                        "op": "EDIT_RAW_HTML",
+                        "args": {"description": str(actions)}
+                    })
+            else:
+                # Fallback for unknown dict format
+                parsed_changes.append({
+                    "slide_id": 1,
+                    "op": "EDIT_RAW_HTML",
+                    "args": {"description": str(data["changes"])}
+                })
+        
+        # Handle case where changes is a list
+        elif isinstance(data["changes"], list):
+            for change_item in data["changes"]:
+                if isinstance(change_item, str):
+                    # Parse string description into a Change object
+                    parsed_changes.append({
+                        "slide_id": 1,  # Default to slide 1, could be improved with better parsing
+                        "op": "EDIT_RAW_HTML",
+                        "args": {"description": change_item}
+                    })
+                elif isinstance(change_item, dict):
+                    # Handle new format with slide_number and change_type
+                    if "slide_number" in change_item and "description" in change_item:
+                        parsed_changes.append({
+                            "slide_id": change_item["slide_number"],
+                            "op": "EDIT_RAW_HTML",
+                            "args": {"description": change_item["description"]}
+                        })
+                    # Handle old format with slide_id and op
+                    elif "slide_id" in change_item and "op" in change_item:
+                        parsed_changes.append(change_item)
+                    else:
+                        # Fallback for unknown dict format
+                        parsed_changes.append({
+                            "slide_id": 1,
+                            "op": "EDIT_RAW_HTML",
+                            "args": {"description": str(change_item)}
+                        })
+        
+        data["changes"] = parsed_changes
     
     return UtteranceIntent(**data)
 
@@ -270,6 +361,31 @@ def create_todos(topic: str, style_hint: str, n_slides: int) -> List[Todo]:
     
     content = response.choices[0].message.content
     
+    # Handle new response format (list of dictionaries)
+    if isinstance(content, list):
+        # Extract JSON text from the list structure
+        json_text = None
+        for item in content:
+            if isinstance(item, dict) and item.get('type') == 'text':
+                json_text = item.get('text', '')
+                break
+        
+        if json_text:
+            content = json_text
+        else:
+            # Fallback: try to find any text content
+            for item in content:
+                if isinstance(item, dict) and 'text' in item:
+                    content = item['text']
+                    break
+            else:
+                # Last resort: convert to string
+                content = str(content)
+    
+    # Ensure content is a string
+    if not isinstance(content, str):
+        content = str(content)
+    
     # Strip markdown code fences if present
     if content.startswith("```json"):
         content = content[7:]  # Remove ```json
@@ -286,10 +402,14 @@ def create_todos(topic: str, style_hint: str, n_slides: int) -> List[Todo]:
         data = [data]
     
     # Validate and fix each todo
-    valid_actions = ["WRITE_SLIDE"]
-    for item in data:
-        item["action"] = item.get("action") if item.get("action") in valid_actions else "WRITE_SLIDE"
-        item["id"] = item.get("id") if isinstance(item.get("id"), int) else len(data)
+    valid_actions = ["WRITE_SLIDE", "FINALIZE_DECK"]
+    for i, item in enumerate(data):
+        # First n_slides should be WRITE_SLIDE, last one should be FINALIZE_DECK
+        if i < n_slides:
+            item["action"] = "WRITE_SLIDE"
+        else:
+            item["action"] = "FINALIZE_DECK"
+        item["id"] = item.get("id") if isinstance(item.get("id"), int) else i + 1
         item["depends_on"] = item.get("depends_on") if isinstance(item.get("depends_on"), list) else []
     
     return [Todo(**item) for item in data]
@@ -313,7 +433,34 @@ def write_slide_html(title: str, outline: str, style_hint: str) -> str:
         ]
     )
     
-    raw_content = response.choices[0].message.content.strip()
+    raw_content = response.choices[0].message.content
+    
+    # Handle new response format (list of dictionaries)
+    if isinstance(raw_content, list):
+        # Extract text from the list structure
+        text_content = None
+        for item in raw_content:
+            if isinstance(item, dict) and item.get('type') == 'text':
+                text_content = item.get('text', '')
+                break
+        
+        if text_content:
+            raw_content = text_content
+        else:
+            # Fallback: try to find any text content
+            for item in raw_content:
+                if isinstance(item, dict) and 'text' in item:
+                    raw_content = item['text']
+                    break
+            else:
+                # Last resort: convert to string
+                raw_content = str(raw_content)
+    
+    # Ensure content is a string and strip
+    if not isinstance(raw_content, str):
+        raw_content = str(raw_content)
+    raw_content = raw_content.strip()
+    
     print(f"[DEBUG] write_slide_html - raw LLM response length: {len(raw_content)}")
     print(f"[DEBUG] write_slide_html - raw LLM response preview: {raw_content[:200]}...")
     
@@ -354,7 +501,34 @@ def create_slide_from_spec(title: str, bullets: List[str], style_hint: str) -> s
         ]
     )
     
-    raw_content = response.choices[0].message.content.strip()
+    raw_content = response.choices[0].message.content
+    
+    # Handle new response format (list of dictionaries)
+    if isinstance(raw_content, list):
+        # Extract text from the list structure
+        text_content = None
+        for item in raw_content:
+            if isinstance(item, dict) and item.get('type') == 'text':
+                text_content = item.get('text', '')
+                break
+        
+        if text_content:
+            raw_content = text_content
+        else:
+            # Fallback: try to find any text content
+            for item in raw_content:
+                if isinstance(item, dict) and 'text' in item:
+                    raw_content = item['text']
+                    break
+            else:
+                # Last resort: convert to string
+                raw_content = str(raw_content)
+    
+    # Ensure content is a string and strip
+    if not isinstance(raw_content, str):
+        raw_content = str(raw_content)
+    raw_content = raw_content.strip()
+    
     print(f"[DEBUG] create_slide_from_spec - raw LLM response length: {len(raw_content)}")
     print(f"[DEBUG] create_slide_from_spec - raw LLM response preview: {raw_content[:200]}...")
     
@@ -628,109 +802,237 @@ def summarize_status(todos: List[Todo], artifacts: Dict[int, str]) -> List[Slide
 # Run-to-completion node
 # =========================
 def run_to_completion_node(s: AgentState) -> AgentState:
-    # 1) NLU + config merge
-    cfg = ExtractedConfig(topic=s.get("topic"), style_hint=s.get("style_hint"), n_slides=s.get("n_slides"))
-    ui = interpret_utterance.invoke({"messages": s["messages"], "current_config": cfg}, config={"run_id": s.get("run_id", "default")})
-    s["last_intent"] = ui.intent
-    changed = False
-    if ui.config_delta.topic and ui.config_delta.topic != s.get("topic"):
-        s["topic"] = ui.config_delta.topic; changed = True
-    if ui.config_delta.style_hint and ui.config_delta.style_hint != s.get("style_hint"):
-        s["style_hint"] = ui.config_delta.style_hint; changed = True
-    if ui.config_delta.n_slides and ui.config_delta.n_slides != s.get("n_slides"):
-        s["n_slides"] = int(ui.config_delta.n_slides); changed = True
-    if changed:
-        s["config_version"] = (s.get("config_version") or 0) + 1
-        s.update(todos=[], cursor=0, artifacts={}, deck_html="")
+    """Run the agent to completion, processing all intents until FINALIZE or SAVE."""
+    
+    import time
+    total_start_time = time.time()
+    max_iterations = 10  # Prevent infinite loops
+    iteration = 0
+    
+    while iteration < max_iterations:
+        iteration += 1
+        iteration_start = time.time()
+        print(f"[DEBUG] run_to_completion_node - iteration {iteration}")
+        
+        # 1) NLU + config merge
+        nlu_start = time.time()
+        cfg = ExtractedConfig(topic=s.get("topic"), style_hint=s.get("style_hint"), n_slides=s.get("n_slides"))
+        print(f"[DEBUG] run_to_completion_node - current config: {cfg}")
+        print(f"[DEBUG] run_to_completion_node - messages: {s['messages']}")
+        
+        ui = interpret_utterance.invoke({"messages": s["messages"], "current_config": cfg}, config={"run_id": s.get("run_id", "default")})
+        print(f"[DEBUG] run_to_completion_node - interpret_utterance result: {ui}")
+        
+        nlu_time = time.time() - nlu_start
+        print(f"[DEBUG] run_to_completion_node - NLU processing took {nlu_time:.2f}s")
+        
+        s["last_intent"] = ui.intent
+        changed = False
+        if ui.config_delta.topic and ui.config_delta.topic != s.get("topic"):
+            print(f"[DEBUG] run_to_completion_node - updating topic: {s.get('topic')} -> {ui.config_delta.topic}")
+            s["topic"] = ui.config_delta.topic; changed = True
+        if ui.config_delta.style_hint and ui.config_delta.style_hint != s.get("style_hint"):
+            print(f"[DEBUG] run_to_completion_node - updating style_hint: {s.get('style_hint')} -> {ui.config_delta.style_hint}")
+            s["style_hint"] = ui.config_delta.style_hint; changed = True
+        if ui.config_delta.n_slides and ui.config_delta.n_slides != s.get("n_slides"):
+            print(f"[DEBUG] run_to_completion_node - updating n_slides: {s.get('n_slides')} -> {ui.config_delta.n_slides}")
+            s["n_slides"] = int(ui.config_delta.n_slides); changed = True
+        
+        print(f"[DEBUG] run_to_completion_node - config changed: {changed}")
+        if changed:
+            s["config_version"] = (s.get("config_version") or 0) + 1
+            s.update(todos=[], cursor=0, artifacts={}, deck_html="")
 
-    # 2) Plan if needed
-    if (s.get("topic") and s.get("style_hint") and s.get("n_slides")) and not s["todos"]:
-        s["todos"] = create_todos.invoke({"topic": s["topic"], "style_hint": s["style_hint"], "n_slides": s["n_slides"]}, config={"run_id": s.get("run_id", "default")})
-        s["cursor"] = 0
-
-    # 3) Generate ALL slides
-    slide_todos = [t for t in s["todos"] if t.action == "WRITE_SLIDE"]
-    print(f"[DEBUG] run_to_completion_node - generating {len(slide_todos)} slides")
-    for i, t in enumerate(slide_todos):
-        print(f"[DEBUG] run_to_completion_node - generating slide {i+1}/{len(slide_todos)}: {t.title}")
-        if t.id in s["artifacts"]:
-            print(f"[DEBUG] run_to_completion_node - slide {t.id} already exists, skipping")
-            continue
-        raw = write_slide_html.invoke({"title": t.title, "outline": t.details, "style_hint": s["style_hint"]}, config={"run_id": s.get("run_id", "default")})
-        print(f"[DEBUG] run_to_completion_node - slide {t.id} generated, length: {len(raw)}")
-        if not validate_html.invoke({"html": raw, "kind":"slide"}, config={"run_id": s.get("run_id", "default")}):
-            print(f"[DEBUG] run_to_completion_node - slide {t.id} failed validation, attempting repair")
-            # attempt one repair pass using constraints
-            raw = patch_slide_html.invoke({"slide_html": raw, "change": Change(op="EDIT_RAW_HTML", args={"fix":"structure"}), "style_hint": s["style_hint"]}, config={"run_id": s.get("run_id", "default")})
-            print(f"[DEBUG] run_to_completion_node - slide {t.id} repair completed, length: {len(raw)}")
-        s["artifacts"][t.id] = sanitize_html.invoke({"html": raw, "level":"conservative"}, config={"run_id": s.get("run_id", "default")})
-        print(f"[DEBUG] run_to_completion_node - slide {t.id} sanitized and stored")
-
-    # 4) Apply any user changes (LLM-only tools)
-    s["pending_changes"] = ui.changes or []
-    for ch in s["pending_changes"]:
-        if ch.op == "REORDER_SLIDES":
-            order = ch.args.get("order", [])
-            slides = [t for t in s["todos"] if t.action=="WRITE_SLIDE"]
-            id2t = {t.id: t for t in slides}
-            new_slides = [id2t[i] for i in order if i in id2t]
-            others = [t for t in s["todos"] if t.action!="WRITE_SLIDE"]
-            s["todos"] = new_slides + others
-            continue
-        if ch.op == "DELETE_SLIDE":
-            sid = ch.slide_id
-            s["todos"] = [t for t in s["todos"] if not (t.action=="WRITE_SLIDE" and t.id==sid)]
-            s["artifacts"].pop(sid, None)
-            continue
-        if ch.op == "INSERT_SLIDE_AFTER":
-            after = ch.slide_id or 0
-            title = ch.args.get("title","New Slide")
-            bullets = ch.args.get("bullets",[])
-            new_html = create_slide_from_spec.invoke({"title": title, "bullets": bullets, "style_hint": s["style_hint"]}, config={"run_id": s.get("run_id", "default")})
-            if not validate_html.invoke({"html": new_html, "kind":"slide"}, config={"run_id": s.get("run_id", "default")}):
-                new_html = patch_slide_html.invoke({"slide_html": new_html, "change": Change(op="EDIT_RAW_HTML", args={"fix":"structure"}), "style_hint": s["style_hint"]}, config={"run_id": s.get("run_id", "default")})
-            new_id = max([t.id for t in s["todos"]], default=0) + 1
-            s["artifacts"][new_id] = sanitize_html.invoke({"html": new_html, "level":"conservative"}, config={"run_id": s.get("run_id", "default")})
-            slides = [t for t in s["todos"] if t.action=="WRITE_SLIDE"]
-            others = [t for t in s["todos"] if t.action!="WRITE_SLIDE"]
-            inserted: List[Todo] = []
-            for t in slides:
-                inserted.append(t)
-                if t.id == after:
-                    inserted.append(Todo(id=new_id, action="WRITE_SLIDE", title=title, details="", depends_on=[]))
-            if after == 0:
-                inserted = [Todo(id=new_id, action="WRITE_SLIDE", title=title, details="", depends_on=[])] + inserted
-            s["todos"] = inserted + others
-            continue
-        # Per-slide content edits
-        sid = ch.slide_id
-        if sid is None or sid not in s["artifacts"]:
-            continue
-        updated = patch_slide_html.invoke({"slide_html": s["artifacts"][sid], "change": ch, "style_hint": s["style_hint"]}, config={"run_id": s.get("run_id", "default")})
-        s["artifacts"][sid] = updated
-    s["pending_changes"] = []
-
-    # 5) FINALIZE (individual slides are already complete HTML documents)
-    if s["todos"]:
-        slide_ids = [t.id for t in s["todos"] if t.action=="WRITE_SLIDE"]
-        slides = [s["artifacts"].get(i,"") for i in slide_ids if s["artifacts"].get(i,"")]
-        print(f"[DEBUG] run_to_completion_node - slide_ids: {slide_ids}")
-        print(f"[DEBUG] run_to_completion_node - slides count: {len(slides)}")
-        if slides:
-            print(f"[DEBUG] run_to_completion_node - slides are complete HTML documents")
-            # Each slide is already a complete HTML document with Tailwind CSS
-            s["deck_html"] = ""  # Not needed since we return individual slides
-            print(f"[DEBUG] run_to_completion_node - individual slides ready")
+        # 2) Plan if needed
+        print(f"[DEBUG] run_to_completion_node - checking plan conditions:")
+        print(f"[DEBUG] run_to_completion_node - topic: {s.get('topic')}")
+        print(f"[DEBUG] run_to_completion_node - style_hint: {s.get('style_hint')}")
+        print(f"[DEBUG] run_to_completion_node - n_slides: {s.get('n_slides')}")
+        print(f"[DEBUG] run_to_completion_node - todos: {s.get('todos')}")
+        
+        if (s.get("topic") and s.get("style_hint") and s.get("n_slides")) and not s["todos"]:
+            print(f"[DEBUG] run_to_completion_node - creating todos...")
+            s["todos"] = create_todos.invoke({"topic": s["topic"], "style_hint": s["style_hint"], "n_slides": s["n_slides"]}, config={"run_id": s.get("run_id", "default")})
+            s["cursor"] = 0
+            print(f"[DEBUG] run_to_completion_node - created todos: {s['todos']}")
         else:
-            print(f"[DEBUG] run_to_completion_node - no slides to process")
+            print(f"[DEBUG] run_to_completion_node - skipping todo creation")
 
-    # 6) SAVE (auto) - save individual slides
-    if s["artifacts"]:
-        for slide_id, slide_html in s["artifacts"].items():
-            save_file.invoke({"path": f"slide_{slide_id}.html", "content": slide_html}, config={"run_id": s.get("run_id", "default")})
+        # 3) Generate ALL slides
+        slide_todos = [t for t in s["todos"] if t.action == "WRITE_SLIDE"]
+        print(f"[DEBUG] run_to_completion_node - generating {len(slide_todos)} slides")
+        print(f"[DEBUG] run_to_completion_node - all todos: {[(t.id, t.action, t.title) for t in s['todos']]}")
+        
+        for i, t in enumerate(slide_todos):
+            print(f"[DEBUG] run_to_completion_node - generating slide {i+1}/{len(slide_todos)}: {t.title}")
+            if t.id in s["artifacts"]:
+                print(f"[DEBUG] run_to_completion_node - slide {t.id} already exists, skipping")
+                continue
+            
+            try:
+                raw = write_slide_html.invoke({"title": t.title, "outline": t.details, "style_hint": s["style_hint"]}, config={"run_id": s.get("run_id", "default")})
+                print(f"[DEBUG] run_to_completion_node - slide {t.id} generated, length: {len(raw)}")
+                
+                if not validate_html.invoke({"html": raw, "kind":"slide"}, config={"run_id": s.get("run_id", "default")}):
+                    print(f"[DEBUG] run_to_completion_node - slide {t.id} failed validation, attempting repair")
+                    # attempt one repair pass using constraints
+                    raw = patch_slide_html.invoke({"slide_html": raw, "change": Change(op="EDIT_RAW_HTML", args={"fix":"structure"}), "style_hint": s["style_hint"]}, config={"run_id": s.get("run_id", "default")})
+                    print(f"[DEBUG] run_to_completion_node - slide {t.id} repair completed, length: {len(raw)}")
+                
+                s["artifacts"][t.id] = sanitize_html.invoke({"html": raw, "level":"conservative"}, config={"run_id": s.get("run_id", "default")})
+                print(f"[DEBUG] run_to_completion_node - slide {t.id} sanitized and stored")
+                
+            except Exception as e:
+                print(f"[ERROR] run_to_completion_node - failed to generate slide {t.id}: {e}")
+                # Create a placeholder slide
+                placeholder_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{t.title}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body style="width: 1280px; height: 720px; margin: 0; padding: 0; overflow: hidden; background: white;">
+    <div style="max-width: 1280px; max-height: 720px; margin: 0 auto; padding: 32px; box-sizing: border-box;">
+        <h1 style="color: #102025; font-size: 48px; font-weight: bold; margin-bottom: 24px;">{t.title}</h1>
+        <p style="color: #5D6D71; font-size: 18px;">Error generating slide content. Please try again.</p>
+    </div>
+</body>
+</html>"""
+                s["artifacts"][t.id] = placeholder_html
+                print(f"[DEBUG] run_to_completion_node - slide {t.id} placeholder created")
 
-    # 7) Status list with slide HTML
-    s["status"] = summarize_status.invoke({"todos": s["todos"], "artifacts": s["artifacts"]}, config={"run_id": s.get("run_id", "default")})
+        # 4) Apply any user changes (LLM-only tools)
+        s["pending_changes"] = ui.changes or []
+        print(f"[DEBUG] run_to_completion_node - processing {len(s['pending_changes'])} changes")
+        
+        import time
+        change_start_time = time.time()
+        
+        for ch in s["pending_changes"]:
+            change_item_start = time.time()
+            print(f"[DEBUG] run_to_completion_node - processing change: {ch.op}")
+            if ch.op == "REORDER_SLIDES":
+                order = ch.args.get("order", [])
+                slides = [t for t in s["todos"] if t.action=="WRITE_SLIDE"]
+                id2t = {t.id: t for t in slides}
+                new_slides = [id2t[i] for i in order if i in id2t]
+                others = [t for t in s["todos"] if t.action!="WRITE_SLIDE"]
+                s["todos"] = new_slides + others
+                continue
+            if ch.op == "DELETE_SLIDE":
+                sid = ch.slide_id
+                s["todos"] = [t for t in s["todos"] if not (t.action=="WRITE_SLIDE" and t.id==sid)]
+                s["artifacts"].pop(sid, None)
+                continue
+            if ch.op == "INSERT_SLIDE_AFTER":
+                after = ch.slide_id or 0
+                title = ch.args.get("title","New Slide")
+                bullets = ch.args.get("bullets",[])
+                new_html = create_slide_from_spec.invoke({"title": title, "bullets": bullets, "style_hint": s["style_hint"]}, config={"run_id": s.get("run_id", "default")})
+                if not validate_html.invoke({"html": new_html, "kind":"slide"}, config={"run_id": s.get("run_id", "default")}):
+                    new_html = patch_slide_html.invoke({"slide_html": new_html, "change": Change(op="EDIT_RAW_HTML", args={"fix":"structure"}), "style_hint": s["style_hint"]}, config={"run_id": s.get("run_id", "default")})
+                new_id = max([t.id for t in s["todos"]], default=0) + 1
+                s["artifacts"][new_id] = sanitize_html.invoke({"html": new_html, "level":"conservative"}, config={"run_id": s.get("run_id", "default")})
+                slides = [t for t in s["todos"] if t.action=="WRITE_SLIDE"]
+                others = [t for t in s["todos"] if t.action!="WRITE_SLIDE"]
+                inserted: List[Todo] = []
+                for t in slides:
+                    inserted.append(t)
+                    if t.id == after:
+                        inserted.append(Todo(id=new_id, action="WRITE_SLIDE", title=title, details="", depends_on=[]))
+                if after == 0:
+                    inserted = [Todo(id=new_id, action="WRITE_SLIDE", title=title, details="", depends_on=[])] + inserted
+                s["todos"] = inserted + others
+                continue
+            # Per-slide content edits
+            sid = ch.slide_id
+            if sid is None or sid not in s["artifacts"]:
+                print(f"[DEBUG] run_to_completion_node - skipping change for slide {sid} (not found)")
+                continue
+            
+            print(f"[DEBUG] run_to_completion_node - applying patch to slide {sid}")
+            patch_start = time.time()
+            updated = patch_slide_html.invoke({"slide_html": s["artifacts"][sid], "change": ch, "style_hint": s["style_hint"]}, config={"run_id": s.get("run_id", "default")})
+            patch_time = time.time() - patch_start
+            print(f"[DEBUG] run_to_completion_node - patch completed in {patch_time:.2f}s")
+            
+            s["artifacts"][sid] = updated
+            
+            change_item_time = time.time() - change_item_start
+            print(f"[DEBUG] run_to_completion_node - change {ch.op} completed in {change_item_time:.2f}s")
+        
+        change_total_time = time.time() - change_start_time
+        print(f"[DEBUG] run_to_completion_node - all changes processed in {change_total_time:.2f}s")
+        
+        # Don't clear pending_changes here - we need them for the exit condition check
+        # s["pending_changes"] = []
+
+        # 5) FINALIZE (individual slides are already complete HTML documents)
+        if s["todos"]:
+            slide_ids = [t.id for t in s["todos"] if t.action=="WRITE_SLIDE"]
+            slides = [s["artifacts"].get(i,"") for i in slide_ids if s["artifacts"].get(i,"")]
+            print(f"[DEBUG] run_to_completion_node - slide_ids: {slide_ids}")
+            print(f"[DEBUG] run_to_completion_node - slides count: {len(slides)}")
+            if slides:
+                print(f"[DEBUG] run_to_completion_node - slides are complete HTML documents")
+                # Each slide is already a complete HTML document with Tailwind CSS
+                s["deck_html"] = ""  # Not needed since we return individual slides
+                print(f"[DEBUG] run_to_completion_node - individual slides ready")
+            else:
+                print(f"[DEBUG] run_to_completion_node - no slides to process")
+
+        # 6) SAVE (auto) - save individual slides
+        if s["artifacts"]:
+            for slide_id, slide_html in s["artifacts"].items():
+                save_file.invoke({"path": f"slide_{slide_id}.html", "content": slide_html}, config={"run_id": s.get("run_id", "default")})
+
+        # 7) Status list with slide HTML
+        s["status"] = summarize_status.invoke({"todos": s["todos"], "artifacts": s["artifacts"]}, config={"run_id": s.get("run_id", "default")})
+        
+        # Check if we should continue or exit
+        print(f"[DEBUG] run_to_completion_node - current intent: {ui.intent}")
+        print(f"[DEBUG] run_to_completion_node - artifacts count: {len(s.get('artifacts', {}))}")
+        print(f"[DEBUG] run_to_completion_node - todos count: {len(s.get('todos', []))}")
+        print(f"[DEBUG] run_to_completion_node - pending changes: {len(s.get('pending_changes', []))}")
+        
+        if ui.intent in ["FINALIZE", "SAVE"]:
+            print(f"[DEBUG] run_to_completion_node - completion intent detected, exiting loop")
+            break
+        elif ui.intent == "ADD_CHANGES":
+            # For ADD_CHANGES, we only process changes - no config changes expected
+            print(f"[DEBUG] run_to_completion_node - ADD_CHANGES intent, processing changes only")
+            print(f"[DEBUG] run_to_completion_node - ADD_CHANGES: config_delta is empty (expected)")
+            
+            # Changes are already processed in step 4, no need to regenerate
+            # The patch_slide_html function already updated the artifacts
+            if s.get("pending_changes"):
+                print(f"[DEBUG] run_to_completion_node - {len(s['pending_changes'])} changes processed in step 4")
+                for change in s.get("pending_changes", []):
+                    print(f"[DEBUG] run_to_completion_node - processed change: {change.op} for slide {change.slide_id}")
+            
+            # Clear pending changes after processing
+            s["pending_changes"] = []
+            print(f"[DEBUG] run_to_completion_node - ADD_CHANGES processing complete, exiting loop")
+            break
+        elif ui.intent == "REQUEST_DECK" and s.get("topic") and s.get("style_hint") and s.get("n_slides"):
+            # Check if we have todos and have processed them
+            if s["todos"] and len(s.get("artifacts", {})) > 0:
+                print(f"[DEBUG] run_to_completion_node - deck generation complete, exiting loop")
+                break
+            elif s["todos"] and len(s.get("artifacts", {})) == 0:
+                print(f"[DEBUG] run_to_completion_node - todos exist but no artifacts, continuing")
+                continue
+            else:
+                print(f"[DEBUG] run_to_completion_node - no todos yet, continuing")
+                continue
+        else:
+            print(f"[DEBUG] run_to_completion_node - continuing loop for intent: {ui.intent}")
+    
+    total_time = time.time() - total_start_time
+    print(f"[DEBUG] run_to_completion_node - completed after {iteration} iterations in {total_time:.2f}s")
     return s
 
 # =========================
@@ -893,8 +1195,14 @@ class HtmlDeck:
 
     def process_message(self, message: str) -> str:
         """Process a user message and update the deck state"""
+        print(f"[DEBUG] process_message - input message: {message}")
         self.state["messages"].append({"role": "user", "content": message})
-        self.state = run_to_completion_node(self.state)
+        
+        # Create a truncated state for logging (limit artifacts to 10 lines)
+
+        
+        print(f"[DEBUG] process_message - artifacts count: {len(self.state.get('artifacts', {}))}")
+        print(f"[DEBUG] process_message - todos count: {len(self.state.get('todos', []))}")
         return self.state.get("deck_html", "")
 
     # Tool functions for LLM integration

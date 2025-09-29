@@ -75,6 +75,7 @@ conversations: Dict[str, Dict] = {}
 # --- Demo static mode -------------------------------------------------------
 # When enabled, any user prompt will render a predefined set of static slides
 # without calling the LLM or tools. Useful for controlled demos.
+# NOTE: This is currently enabled and uses the new LLM flow (_run_llm_flow)
 DEMO_STATIC_MODE: bool = True
 
 def _append_api_message(session_id: str, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
@@ -84,63 +85,111 @@ def _append_api_message(session_id: str, role: str, content: str, metadata: Opti
 
 
 
-def _run_llm_flow(session_id: str) -> None:
-    """Run the new LLM-based slide generation flow"""
+
+def _run_llm_flow(session_id: str, user_prompt: str) -> None:
+    """Run the new LLM-based slide generation flow with user prompt"""
     global html_deck, chatbot_instance
-    html_deck = html_slides.HtmlDeck(theme=ey_theme)
-    chatbot_instance.html_deck = html_deck
+    
+    try:
+        # Check if this is a follow-on request or first-time request
+        is_follow_on = html_deck is not None and html_deck.state.get("todos") and len(html_deck.state.get("artifacts", {})) > 0
+        
+        if not is_follow_on:
+            # First-time request: create new deck
+            print(f"[DEBUG] LLM Flow - Creating new deck for first-time request")
+            html_deck = html_slides.HtmlDeck(theme=ey_theme)
+            chatbot_instance.html_deck = html_deck
+            
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content=(
+                    "I'll analyze your request and generate a professional slide deck using AI. "
+                    "Let me process your message and extract the key information."
+                ),
+            )
+        else:
+            # Follow-on request: reuse existing deck
+            print(f"[DEBUG] LLM Flow - Reusing existing deck for follow-on request")
+            print(f"[DEBUG] LLM Flow - Current artifacts: {len(html_deck.state.get('artifacts', {}))}")
+            print(f"[DEBUG] LLM Flow - Current todos: {len(html_deck.state.get('todos', []))}")
+            
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content="I'll process your follow-on request and update the existing slide deck.",
+            )
 
-    # Step 1: planning message
-    _append_api_message(
-        session_id,
-        role="assistant",
-        content=(
-            "I'll generate a professional slide deck using AI. "
-            "Let me create the slides based on your request."
-        ),
-    )
-
-    # Step 2: Generate slides using the new LLM approach
-    _append_api_message(
-        session_id,
-        role="assistant",
-        content="Generating slides with AI...",
-        metadata={"title": "Agent is using a tool"}
-    )
-    time.sleep(1.0)
-    
-    print(f"[DEBUG] LLM Flow - About to call tool_generate_deck")
-    result = html_deck.tool_generate_deck(
-        topic="AI and Machine Learning",
-        style_hint="Professional, clean, modern",
-        n_slides=3
-    )
-    print(f"[DEBUG] LLM Flow - tool_generate_deck result: {result}")
-    
-    _append_api_message(
-        session_id,
-        role="assistant",
-        content=f"✅ Generated {result}",
-        metadata={"title": "Agent tool result"}
-    )
-
-    # Step 3: Show status
-    status = html_deck.tool_get_status()
-    print(f"[DEBUG] LLM Flow - Status: {status}")
-    
-    # Get the HTML content for debugging
-    html_content = html_deck.tool_get_html()
-    print(f"[DEBUG] LLM Flow - HTML length: {len(html_content)}")
-    print(f"[DEBUG] LLM Flow - HTML preview: {html_content[:200]}...")
-    
-    _append_api_message(
-        session_id,
-        role="assistant",
-        content=f"Slide deck created successfully!\n\n{status}"
-    )
-    
-    # Signal completion to stop frontend polling
-    _append_api_message(session_id, role="assistant", content="Generation complete.", metadata={"title": "Done"})
+        # Step 2: Process the message using the agent's built-in logic
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content="Processing your request with AI...",
+            metadata={"title": "Agent is using a tool"}
+        )
+        # Removed artificial delay - let the actual processing time be the delay
+        
+        print(f"[DEBUG] LLM Flow - Processing user prompt: {user_prompt}")
+        
+        # Use the agent's process_message method which handles parameter extraction
+        import time
+        process_start = time.time()
+        result = html_deck.process_message(user_prompt)
+        process_time = time.time() - process_start
+        print(f"[DEBUG] LLM Flow - process_message completed in {process_time:.2f}s")
+        print(f"[DEBUG] LLM Flow - process_message result: {result}")
+        
+        # Step 3: Check if slides were generated
+        slides = html_deck.tool_get_html()
+        print(f"[DEBUG] LLM Flow - Generated {len(slides)} slides")
+        
+        if not slides:
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content="❌ No slides were generated. Please try a different request.",
+                metadata={"title": "Agent tool result"}
+            )
+            return
+        
+        # Step 4: Show progress efficiently (no artificial delays)
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content=f"✅ Generated {len(slides)} slides successfully",
+            metadata={"title": "Agent tool result"}
+        )
+        
+        # Step 5: Show final status
+        status = html_deck.tool_get_status()
+        print(f"[DEBUG] LLM Flow - Status: {status}")
+        
+        if is_follow_on:
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content=f"Slide deck updated successfully!\n\n{status}"
+            )
+        else:
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content=f"Slide deck created successfully!\n\n{status}"
+            )
+        
+        # Signal completion to stop frontend polling
+        _append_api_message(session_id, role="assistant", content="Generation complete.", metadata={"title": "Done"})
+        
+    except Exception as e:
+        print(f"[ERROR] LLM Flow - Error processing request: {e}")
+        import traceback
+        traceback.print_exc()
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content=f"❌ Error processing your request: {str(e)}",
+            metadata={"title": "Error"}
+        )
 
 def _run_prism_flow(session_id: str) -> None:
     try:
@@ -471,22 +520,18 @@ async def chat(request: ChatRequest):
         
         # Demo static mode: bypass LLM and tools, render predefined slides
         if DEMO_STATIC_MODE:
-            # Minimal transcript: add user only, then stream demo steps asynchronously
+            # Minimal transcript: add user only, then process synchronously
             update_conversations_with_openai_message(session_id, {"role": "user", "content": user_input})
-            import threading
-            t = threading.Thread(target=_run_llm_flow, args=(session_id,))
-            t.daemon = True
-            t.start()
+            # Process the LLM flow synchronously to block until completion
+            _run_llm_flow(session_id, user_input)
             conv = get_or_create_conversation(session_id)
             return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
 
-        # Normal mode: Add user message and process asynchronously
+        # Normal mode: Add user message and process synchronously
         user_msg_openai = {"role": "user", "content": user_input}
         update_conversations_with_openai_message(session_id, user_msg_openai)
-        import threading
-        thread = threading.Thread(target=process_conversation_sync, args=(session_id,))
-        thread.daemon = True
-        thread.start()
+        # Process the conversation synchronously to block until completion
+        process_conversation_sync(session_id)
         conv = get_or_create_conversation(session_id)
         return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
         
@@ -596,9 +641,38 @@ async def reset_slides():
                 ws=ws,
                 tool_dict=TOOL_DICT
             )
+        print(f"[DEBUG] reset_slides - Created new deck, resetting state")
         return {"message": "Slides reset successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error resetting slides: {str(e)}")
+
+@app.post("/slides/clear")
+async def clear_slides():
+    """Clear current slides but keep the deck instance for follow-on requests"""
+    try:
+        global html_deck, chatbot_instance
+        if html_deck is not None:
+            # Clear the state but keep the deck instance
+            html_deck.state.update({
+                "todos": [],
+                "artifacts": {},
+                "deck_html": "",
+                "pending_changes": [],
+                "messages": [],
+                "topic": None,
+                "style_hint": None,
+                "n_slides": None,
+                "config_version": 0,
+                "cursor": 0,
+                "errors": [],
+                "metrics": {},
+                "last_intent": None,
+                "status": None
+            })
+            print(f"[DEBUG] clear_slides - Cleared deck state")
+        return {"message": "Slides cleared successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error clearing slides: {str(e)}")
 
 @app.post("/slides/generate")
 async def generate_slides(request: Dict[str, Any]):

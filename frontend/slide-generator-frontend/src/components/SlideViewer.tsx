@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import styled from 'styled-components';
 
 interface SlideViewerProps {
-  html: string;
+  slides: string[];
   isRefreshing: boolean;
 }
 
@@ -210,21 +210,8 @@ const ThumbnailFrame = React.memo<{
 
   // Generate thumbnail content
   const generateThumbnailContent = useCallback(() => {
-    return `<html><head><style>html,body{margin:0;height:100%;overflow:hidden} .reveal{height:100vh} .reveal .slides{height:100%}</style>
-<script>try{location.hash='#/${slideIndex}';}catch(e){}</script></head><body>${html}
-<script>(function(){
-  var desired=${slideIndex};
-  function go(){
-    try{var d=window.__DECK__; if(d && typeof d.slide==='function'){d.slide(desired,0,0); return true;}}catch(e){}
-    return false;
-  }
-  if(!go()){
-    var iv=setInterval(function(){ if(go()) clearInterval(iv); }, 100);
-    setTimeout(function(){clearInterval(iv);}, 5000);
-  }
-})();</script>
-</body></html>`;
-  }, [slideIndex, html]);
+    return `<html><head><style>html,body{margin:0;height:100%;overflow:hidden}</style></head><body>${html}</body></html>`;
+  }, [html]);
 
   // Update thumbnail when refresh is requested
   useEffect(() => {
@@ -309,8 +296,8 @@ const SlideListItemMemo = React.memo<{
 
 SlideListItemMemo.displayName = 'SlideListItemMemo';
 
-const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
-  const hasSlides = html && html.trim().length > 0;
+const SlideViewer: React.FC<SlideViewerProps> = ({ slides, isRefreshing }) => {
+  const hasSlides = slides && slides.length > 0;
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const slideFrameRef = useRef<HTMLDivElement | null>(null);
@@ -344,15 +331,14 @@ const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
     }
 
     try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-      const sections = Array.from(doc.querySelectorAll('.reveal .slides section'));
-      const currentSlideCount = sections.length;
+      const currentSlideCount = slides.length;
       
       // Only update if slide count changed
       if (currentSlideCount !== lastSlideCount) {
-        const newSlidesMeta = sections.map((section, i) => {
-          const heading = section.querySelector('h1, h2, h3');
+        const newSlidesMeta = slides.map((slideHtml, i) => {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(slideHtml, 'text/html');
+          const heading = doc.querySelector('h1, h2, h3');
           const title = (heading?.textContent || '').trim() || `Slide ${i + 1}`;
           return { index: i, title };
         });
@@ -363,7 +349,7 @@ const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
       setSlidesMeta([]);
       setLastSlideCount(0);
     }
-  }, [html, hasSlides, lastSlideCount]);
+  }, [slides, hasSlides, lastSlideCount]);
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -389,15 +375,12 @@ const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
     window.addEventListener('resize', handleResize);
     
     return () => window.removeEventListener('resize', handleResize);
-  }, [hasSlides, html]);
+  }, [hasSlides, slides]);
 
   const gotoSlide = useCallback((index: number) => {
     // Only update if the index is different from current active index
     if (index !== activeIndex) {
       setActiveIndex(index);
-      try {
-        iframeRef.current?.contentWindow?.postMessage({ type: 'NAVIGATE_TO', index }, '*');
-      } catch {}
     }
   }, [activeIndex]);
 
@@ -408,22 +391,12 @@ const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
     // Only reset to first slide if we don't have any slides yet or if this is a completely new deck
     if (slidesMeta.length === 0) {
       setActiveIndex(0);
-      // Slight delay to allow iframe to mount its scripts
-      const id = window.setTimeout(() => {
-        try {
-          iframeRef.current?.contentWindow?.postMessage({ type: 'NAVIGATE_TO', index: 0 }, '*');
-        } catch {}
-      }, 150);
-      return () => window.clearTimeout(id);
     }
     
     // If the current active index is beyond the available slides, reset to last slide
     if (activeIndex >= slidesMeta.length && slidesMeta.length > 0) {
       const newIndex = slidesMeta.length - 1;
       setActiveIndex(newIndex);
-      try {
-        iframeRef.current?.contentWindow?.postMessage({ type: 'NAVIGATE_TO', index: newIndex }, '*');
-      } catch {}
     }
   }, [hasSlides, slidesMeta.length, activeIndex]);
 
@@ -438,7 +411,7 @@ const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
                   key={s.index}
                   slide={s}
                   activeIndex={activeIndex}
-                  html={html}
+                  html={slides[s.index] || ''}
                   onGotoSlide={gotoSlide}
                 />
               ))}
@@ -451,14 +424,10 @@ const SlideViewer: React.FC<SlideViewerProps> = ({ html, isRefreshing }) => {
               )}
               <IFrame
                 ref={iframeRef}
-                srcDoc={html}
+                srcDoc={slides[activeIndex] || ''}
                 title="Generated Slides"
                 sandbox="allow-scripts allow-same-origin"
                 onLoad={() => {
-                  // Nudge navigation on load in case READY message is missed early
-                  try {
-                    iframeRef.current?.contentWindow?.postMessage({ type: 'NAVIGATE_TO', index: activeIndex }, '*');
-                  } catch {}
                   // Calculate scale after iframe loads
                   setTimeout(calculateScaleFactor, 100);
                 }}

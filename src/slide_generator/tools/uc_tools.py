@@ -2,7 +2,7 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
 from unitycatalog.ai.core.databricks import DatabricksFunctionClient
 import pandas as pd
-ws = WorkspaceClient(product='slide-generator', profile='e2-demo-field-eng-aws')
+ws = WorkspaceClient(product='slide-generator', profile='e2-demo')
 
 space_id = "01f0837bc42a1b0281e4376d4e3d6143"
 example_query = "give me ey spend by day for last 6 months"
@@ -35,7 +35,7 @@ def query_genie_space(question: str, space_id: str = space_id, workspace_client:
 
 vs_tool = "tariq_yaaqba.rag_demo.similarity_vector_search"
 client = DatabricksFunctionClient(
-    profile='e2-demo-field-eng-aws'
+    profile='e2-demo'
 )
 def retrieval_tool(question: str) -> str:
     response = client.execute_function(function_name=vs_tool, parameters={"question": question})

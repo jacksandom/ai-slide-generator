@@ -78,12 +78,12 @@ source .venv/bin/activate
 print_info "Installing Python dependencies..."
 if [ -f "requirements.txt" ]; then
     print_status "Installing main Python requirements"
-    pip install -r requirements.txt
+    pip3 install -r requirements.txt
 fi
 
 if [ -f "backend/requirements.txt" ]; then
     print_status "Installing backend Python requirements"
-    pip install -r backend/requirements.txt
+    pip3 install -r backend/requirements.txt
 fi
 
 # Install Node.js dependencies

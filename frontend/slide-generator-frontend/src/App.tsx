@@ -217,7 +217,7 @@ const SectionTitle = styled.h2`
 
 
 const App: React.FC = () => {
-  const [slidesHtml, setSlidesHtml] = useState<string>('');
+  const [slidesHtml, setSlidesHtml] = useState<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const refreshAbortRef = useRef<AbortController | null>(null);
   const refreshDebounceRef = useRef<any>(null);
@@ -234,7 +234,7 @@ const App: React.FC = () => {
     try {
       const response = await fetch('http://localhost:8000/slides/html', { signal: controller.signal });
       const data = await response.json();
-      if (data?.html !== undefined) setSlidesHtml(data.html);
+      if (data?.slides !== undefined) setSlidesHtml(data.slides);
     } catch (error) {
       if ((error as any)?.name !== 'AbortError') {
         console.error('Error refreshing slides:', error);
@@ -315,7 +315,7 @@ const App: React.FC = () => {
           <SlideSection>
             <SectionTitle>Generated Slides</SectionTitle>
             <SlideViewer 
-              html={slidesHtml} 
+              slides={slidesHtml} 
               isRefreshing={isRefreshing}
             />
           </SlideSection>

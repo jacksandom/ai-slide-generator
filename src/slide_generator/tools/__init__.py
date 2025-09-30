@@ -1,6 +1,6 @@
 """Tools for slide generation and processing."""
 
-from .html_slides import HtmlDeck, SlideTheme
+from .html_slides_agent import SlideDeckAgent, SlideTheme
 
-__all__ = ["HtmlDeck", "SlideTheme"]
+__all__ = ["SlideDeckAgent", "SlideTheme"]
 

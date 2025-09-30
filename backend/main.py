@@ -17,7 +17,7 @@ import time
 import sys
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
-from slide_generator.tools import html_slides
+from slide_generator.tools import html_slides_agent
 # Make UC tools optional to allow backend to start without unitycatalog/databricks-connect
 try:
     from slide_generator.tools import uc_tools  # type: ignore
@@ -25,7 +25,7 @@ try:
 except Exception:
     print("Warning: UC tools not available; starting without UC_tools.")
     TOOL_DICT = {}
-from slide_generator.core import chatbot
+# from slide_generator.core import chatbot  # No longer needed with new agent
 from slide_generator.config import config
 from databricks.sdk import WorkspaceClient
 
@@ -45,17 +45,11 @@ def get_logo_base64():
         return ""
 
 # Initialize chatbot and conversation state with neutral branding (no EY watermark)
-ey_theme = html_slides.SlideTheme(
+ey_theme = html_slides_agent.SlideTheme(
     bottom_right_logo_url=None,
     footer_text=None
 )
-html_deck = html_slides.HtmlDeck(theme=ey_theme)
-chatbot_instance = chatbot.Chatbot(
-    html_deck=html_deck,
-    llm_endpoint_name=config.llm_endpoint,
-    ws=ws,
-    tool_dict=TOOL_DICT
-)
+slide_agent = html_slides_agent.SlideDeckAgent(theme=ey_theme)
 
 # Initialize FastAPI app
 app = FastAPI(title="Slide Generator API", version="1.0.0")
@@ -88,17 +82,19 @@ def _append_api_message(session_id: str, role: str, content: str, metadata: Opti
 
 def _run_llm_flow(session_id: str, user_prompt: str) -> None:
     """Run the new LLM-based slide generation flow with user prompt"""
-    global html_deck, chatbot_instance
+    global slide_agent
     
     try:
         # Check if this is a follow-on request or first-time request
-        is_follow_on = html_deck is not None and html_deck.state.get("todos") and len(html_deck.state.get("artifacts", {})) > 0
+        is_follow_on = slide_agent is not None and slide_agent.initial_state.get("todos") and len(slide_agent.initial_state.get("artifacts", {})) > 0
         
         if not is_follow_on:
-            # First-time request: create new deck
-            print(f"[DEBUG] LLM Flow - Creating new deck for first-time request")
-            html_deck = html_slides.HtmlDeck(theme=ey_theme)
-            chatbot_instance.html_deck = html_deck
+            # First-time request: create new agent if needed
+            if slide_agent is None:
+                print(f"[DEBUG] LLM Flow - Creating new agent for first-time request")
+                slide_agent = html_slides_agent.SlideDeckAgent(theme=ey_theme)
+            else:
+                print(f"[DEBUG] LLM Flow - Reusing existing agent for first-time request")
             
             _append_api_message(
                 session_id,
@@ -109,10 +105,10 @@ def _run_llm_flow(session_id: str, user_prompt: str) -> None:
                 ),
             )
         else:
-            # Follow-on request: reuse existing deck
-            print(f"[DEBUG] LLM Flow - Reusing existing deck for follow-on request")
-            print(f"[DEBUG] LLM Flow - Current artifacts: {len(html_deck.state.get('artifacts', {}))}")
-            print(f"[DEBUG] LLM Flow - Current todos: {len(html_deck.state.get('todos', []))}")
+            # Follow-on request: reuse existing agent
+            print(f"[DEBUG] LLM Flow - Reusing existing agent for follow-on request")
+            print(f"[DEBUG] LLM Flow - Current artifacts: {len(slide_agent.initial_state.get('artifacts', {}))}")
+            print(f"[DEBUG] LLM Flow - Current todos: {len(slide_agent.initial_state.get('todos', []))}")
             
             _append_api_message(
                 session_id,
@@ -127,20 +123,19 @@ def _run_llm_flow(session_id: str, user_prompt: str) -> None:
             content="Processing your request with AI...",
             metadata={"title": "Agent is using a tool"}
         )
-        # Removed artificial delay - let the actual processing time be the delay
         
         print(f"[DEBUG] LLM Flow - Processing user prompt: {user_prompt}")
         
-        # Use the agent's process_message method which handles parameter extraction
+        # Use the agent's process_message method
         import time
         process_start = time.time()
-        result = html_deck.process_message(user_prompt)
+        result = slide_agent.process_message(user_prompt)
         process_time = time.time() - process_start
         print(f"[DEBUG] LLM Flow - process_message completed in {process_time:.2f}s")
-        print(f"[DEBUG] LLM Flow - process_message result: {result}")
+        # print(f"[DEBUG] LLM Flow - process_message result: {result}")
         
         # Step 3: Check if slides were generated
-        slides = html_deck.tool_get_html()
+        slides = result.get("slides", [])
         print(f"[DEBUG] LLM Flow - Generated {len(slides)} slides")
         
         if not slides:
@@ -161,20 +156,21 @@ def _run_llm_flow(session_id: str, user_prompt: str) -> None:
         )
         
         # Step 5: Show final status
-        status = html_deck.tool_get_status()
-        print(f"[DEBUG] LLM Flow - Status: {status}")
+        status_list = result.get("status", [])
+        status_text = "\n".join([f"Slide {s.id}: {s.title}" for s in status_list])
+        print(f"[DEBUG] LLM Flow - Status: {status_text}")
         
         if is_follow_on:
             _append_api_message(
                 session_id,
                 role="assistant",
-                content=f"Slide deck updated successfully!\n\n{status}"
+                content=f"Slide deck updated successfully!\n\n{status_text}"
             )
         else:
             _append_api_message(
                 session_id,
                 role="assistant",
-                content=f"Slide deck created successfully!\n\n{status}"
+                content=f"Slide deck created successfully!\n\n{status_text}"
             )
         
         # Signal completion to stop frontend polling
@@ -193,9 +189,8 @@ def _run_llm_flow(session_id: str, user_prompt: str) -> None:
 
 def _run_prism_flow(session_id: str) -> None:
     try:
-        global html_deck, chatbot_instance
-        html_deck = html_slides.HtmlDeck(theme=ey_theme)
-        chatbot_instance.html_deck = html_deck
+        global slide_agent
+        slide_agent = html_slides_agent.SlideDeckAgent(theme=ey_theme)
 
         PRISM_SLIDES: List[str] = [
             """<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"/><meta content=\"width=device-width, initial-scale=1.0\" name=\"viewport\"/><title>Project Prism - The Opportunity</title><link href=\"https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css\" rel=\"stylesheet\"/><link href=\"https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css\" rel=\"stylesheet\"/><link href=\"https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap\" rel=\"stylesheet\"/><style>body{font-family:'Roboto',sans-serif;background-color:white;color:#1A365D;margin:0;padding:0}.slide-container{width:1280px;min-height:720px;overflow:hidden;position:relative}.header{padding:0 60px 8px}.header h1{margin:0}.content{padding:0 60px}.opportunity-icon{color:#FF5722;font-size:48px;margin-bottom:20px}.cost-icon{color:#FF5722;font-size:48px;margin-bottom:20px}.separator{width:2px;background-color:#E2E8F0;height:400px}.accent-text{color:#FF5722;font-weight:500}</style></head><body><div class=\"slide-container\"><div class=\"header\"><h1 class=\"text-3xl font-bold\">The Opportunity: AI Slide Generation for Consulting</h1></div><div class=\"content\"><div class=\"flex justify-between items-start\"><div class=\"w-1/2 pr-10\"><div class=\"opportunity-icon\"><i class=\"fas fa-lightbulb\"></i></div><h2 class=\"text-xl font-semibold mb-4\">Transforming Slide Creation for Consulting</h2><p class=\"mb-4\">Imagine if consulting firms could <span class=\"accent-text\">instantly create tailored, secure slides</span> from proprietary know-how &amp; sensitive client data—<span class=\"accent-text\">automagically</span>.</p><ul class=\"list-disc pl-5 space-y-2\"><li>Leverage existing firm knowledge bases and client data</li><li>Maintain security and compliance across all materials</li><li>Generate high-quality slides that align with firm branding</li></ul><p class=\"mt-4\">Unlocking immediate value for industry leaders:</p><div class=\"flex space-x-4 mt-2\"><span class=\"font-semibold\">EY</span><span class=\"font-semibold\">KPMG</span><span class=\"font-semibold\">BCG</span><span class=\"font-semibold\">+ more</span></div></div><div class=\"separator mx-8\"></div><div class=\"w-1/2 pl-10\"><div class=\"cost-icon\"><i class=\"fas fa-chart-line\"></i></div><h2 class=\"text-xl font-semibold mb-4\">The Cost of Manual Slide Creation</h2><div class=\"mb-4\"><span class=\"text-4xl font-bold accent-text\">4 hours</span><span class=\"text-xl ml-2\">spent daily on slide creation</span></div><div class=\"bg-gray-50 p-4 rounded-lg mb-4\"><p class=\"font-semibold mb-2\">Impact per consultant:</p><table class=\"w-full\"><tr><td>Daily hours on slides:</td><td class=\"text-right\">4 hours</td></tr><tr><td>Average billing rate:</td><td class=\"text-right\">$300/hour</td></tr><tr class=\"border-t border-gray-300\"><td class=\"font-semibold\">Daily cost:</td><td class=\"text-right font-semibold\">$1,200</td></tr><tr><td class=\"font-semibold\">Annual cost (250 days):</td><td class=\"text-right font-semibold\">$300,000</td></tr></table></div><p class=\"mt-4\"><span class=\"accent-text font-semibold\">Project Prism</span> converts wasted hours into billable client value—increasing impact and profitability.</p></div></div></div></div></body></html>""",
@@ -416,7 +411,15 @@ def _run_prism_flow(session_id: str) -> None:
             # Realistic single tool usage message for refresh hook
             _append_api_message(session_id, role="assistant", content="Using HTML Deck Manager to render slide…", metadata={"title": "🔧 Using a tool"})
             time.sleep(0.9)
-            html_deck.add_custom_html_slide(PRISM_SLIDES[i], title="", subtitle="")
+            # Add slide to agent's artifacts directly
+            slide_id = i + 1
+            slide_agent.initial_state["artifacts"][slide_id] = PRISM_SLIDES[i]
+            # Also add to todos if not already present
+            if not any(todo.id == slide_id for todo in slide_agent.initial_state["todos"]):
+                from slide_generator.tools.html_slides_agent import SlideTodo
+                slide_agent.initial_state["todos"].append(
+                    SlideTodo(id=slide_id, action="WRITE_SLIDE", title=title, details="", depends_on=[])
+                )
             # Provide hint for next slide BEFORE the tool result so tool result is last
             if i < 4:
                 _append_api_message(session_id, role="assistant", content=f"Next: Slide {i+2} – {TITLES[i+1]}")
@@ -531,62 +534,13 @@ async def chat(request: ChatRequest):
         user_msg_openai = {"role": "user", "content": user_input}
         update_conversations_with_openai_message(session_id, user_msg_openai)
         # Process the conversation synchronously to block until completion
-        process_conversation_sync(session_id)
+        _run_llm_flow(session_id, user_input)
         conv = get_or_create_conversation(session_id)
         return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing chat: {str(e)}")
 
-def process_conversation_sync(session_id: str):
-    """Process conversation in background thread"""
-    try:
-        print(f"Starting async processing for session {session_id}")
-        conv = get_or_create_conversation(session_id)
-        max_iterations = 30
-        iteration = 0
-        
-        while iteration < max_iterations:
-            iteration += 1
-            print(f"Iteration {iteration} - calling LLM")
-            
-            # Call LLM with OpenAI format conversation
-            assistant_response, stop = chatbot_instance.call_llm(conv["openai_conversation"])
-            print(f"LLM response received, stop={stop}")
-            
-            # Add assistant response to conversations
-            update_conversations_with_openai_message(session_id, assistant_response)
-            print(f"Added assistant response to conversation")
-            
-            # If assistant used tools, execute them
-            if "tool_calls" in assistant_response:
-                print(f"Assistant wants to use {len(assistant_response['tool_calls'])} tools")
-                for tool_call in assistant_response["tool_calls"]:
-                    print(f"Executing tool: {tool_call['function']['name']}")
-                    # Execute the tool
-                    tool_result = chatbot_instance.execute_tool_call(tool_call)
-                    
-                    # Add tool result to conversations
-                    update_conversations_with_openai_message(session_id, tool_result)
-                    print(f"Added tool result to conversation")
-            
-            # Check if we're done
-            if stop:
-                print(f"Conversation complete after {iteration} iterations")
-                break
-                
-            # Safety check
-            if iteration >= max_iterations:
-                print(f"Reached maximum iterations ({max_iterations})")
-                error_msg = {"role": "assistant", "content": "Reached maximum iterations. Please try a simpler request."}
-                update_conversations_with_openai_message(session_id, error_msg)
-                break
-                
-        print(f"Async processing complete for session {session_id}")
-    except Exception as e:
-        print(f"Error in async processing: {e}")
-        import traceback
-        traceback.print_exc()
 
 @app.get("/chat/status/{session_id}")
 async def get_chat_status(session_id: str):
@@ -602,10 +556,9 @@ async def get_chat_status(session_id: str):
 async def get_slides_html():
     """Get current slides as list of HTML strings"""
     try:
-        print(f"[DEBUG] get_slides_html - chatbot_instance: {chatbot_instance}")
-        print(f"[DEBUG] get_slides_html - html_deck: {chatbot_instance.html_deck}")
+        print(f"[DEBUG] get_slides_html - slide_agent: {slide_agent}")
         
-        slides_list = chatbot_instance.html_deck.tool_get_html()
+        slides_list = slide_agent.get_slides()
         print(f"[DEBUG] get_slides_html - slides count: {len(slides_list)}")
         if slides_list:
             print(f"[DEBUG] get_slides_html - first slide preview: {slides_list[0][:200]}...")
@@ -619,7 +572,7 @@ async def get_slides_html():
 async def refresh_slides():
     """Refresh slides display"""
     try:
-        slides_list = chatbot_instance.html_deck.tool_get_html()
+        slides_list = slide_agent.get_slides()
         return {"slides": slides_list}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error refreshing slides: {str(e)}")
@@ -628,48 +581,35 @@ async def refresh_slides():
 async def reset_slides():
     """Reset slides to empty deck"""
     try:
-        # Create new deck with same theme
-        global html_deck, chatbot_instance
-        html_deck = html_slides.HtmlDeck(theme=ey_theme)
-        # Reattach to existing chatbot if available; avoid re-importing UC tools
-        if chatbot_instance is not None:
-            chatbot_instance.html_deck = html_deck
-        else:
-            chatbot_instance = chatbot.Chatbot(
-                html_deck=html_deck,
-                llm_endpoint_name=config.llm_endpoint,
-                ws=ws,
-                tool_dict=TOOL_DICT
-            )
-        print(f"[DEBUG] reset_slides - Created new deck, resetting state")
+        # Create new agent with same theme
+        global slide_agent
+        slide_agent = html_slides_agent.SlideDeckAgent(theme=ey_theme)
+        print(f"[DEBUG] reset_slides - Created new agent, resetting state")
         return {"message": "Slides reset successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error resetting slides: {str(e)}")
 
 @app.post("/slides/clear")
 async def clear_slides():
-    """Clear current slides but keep the deck instance for follow-on requests"""
+    """Clear current slides but keep the agent instance for follow-on requests"""
     try:
-        global html_deck, chatbot_instance
-        if html_deck is not None:
-            # Clear the state but keep the deck instance
-            html_deck.state.update({
+        global slide_agent
+        if slide_agent is not None:
+            # Clear the state but keep the agent instance
+            slide_agent.initial_state.update({
                 "todos": [],
                 "artifacts": {},
-                "deck_html": "",
-                "pending_changes": [],
+                "status": [],
                 "messages": [],
-                "topic": None,
-                "style_hint": None,
-                "n_slides": None,
+                "config": html_slides_agent.SlideConfig(),
                 "config_version": 0,
-                "cursor": 0,
+                "last_intent": None,
+                "pending_changes": [],
                 "errors": [],
                 "metrics": {},
-                "last_intent": None,
-                "status": None
+                "run_id": ""
             })
-            print(f"[DEBUG] clear_slides - Cleared deck state")
+            print(f"[DEBUG] clear_slides - Cleared agent state")
         return {"message": "Slides cleared successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error clearing slides: {str(e)}")
@@ -683,16 +623,14 @@ async def generate_slides(request: Dict[str, Any]):
         n_slides = request.get("n_slides", 3)
         
         # Use the new LLM-based generation
-        result = chatbot_instance.html_deck.tool_generate_deck(
-            topic=topic,
-            style_hint=style_hint,
-            n_slides=n_slides
+        result = slide_agent.process_message(
+            f"Create a {n_slides}-slide presentation about '{topic}' with a '{style_hint}' style"
         )
         
         return {
             "message": "Slides generated successfully",
             "result": result,
-            "slides": chatbot_instance.html_deck.tool_get_html()
+            "slides": slide_agent.get_slides()
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating slides: {str(e)}")
@@ -704,15 +642,14 @@ async def modify_slide(request: Dict[str, Any]):
         slide_id = request.get("slide_id", 1)
         changes = request.get("changes", [])
         
-        result = chatbot_instance.html_deck.tool_modify_slide(
-            slide_id=slide_id,
-            changes=changes
-        )
+        # Convert changes to a natural language request
+        change_description = f"Modify slide {slide_id}: " + "; ".join(changes)
+        result = slide_agent.process_message(change_description)
         
         return {
             "message": "Slide modified successfully",
             "result": result,
-            "slides": chatbot_instance.html_deck.tool_get_html()
+            "slides": slide_agent.get_slides()
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error modifying slide: {str(e)}")
@@ -721,10 +658,10 @@ async def modify_slide(request: Dict[str, Any]):
 async def get_slides_status():
     """Get current slides status"""
     try:
-        status = chatbot_instance.html_deck.tool_get_status()
+        status = slide_agent.get_status()
         return {
-            "status": status,
-            "slides": chatbot_instance.html_deck.tool_get_html()
+            "status": [{"id": s.id, "title": s.title, "is_generated": s.is_generated, "is_valid": s.is_valid} for s in status],
+            "slides": slide_agent.get_slides()
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting slides status: {str(e)}")
@@ -734,8 +671,8 @@ async def export_slides():
     """Export slides to file"""
     try:
         output_path = config.get_output_path("exported_slides.html")
-        result = chatbot_instance.save_deck(str(output_path))
-        return {"message": result, "path": str(output_path)}
+        saved_files = slide_agent.save_slides(str(output_path.parent))
+        return {"message": f"Slides exported successfully to {len(saved_files)} files", "path": str(output_path)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error exporting slides: {str(e)}")
 
@@ -757,8 +694,17 @@ async def export_slides_pptx() -> FileResponse:
         # Ensure directory exists
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Convert
-        converter = HtmlToPptxConverter(html_deck)
+        # Convert - we need to create a temporary HtmlDeck-like object for the converter
+        # Since the converter expects the old interface, we'll create a simple adapter
+        class AgentAdapter:
+            def __init__(self, agent):
+                self.agent = agent
+            
+            def tool_get_html(self):
+                return self.agent.get_slides()
+        
+        adapter = AgentAdapter(slide_agent)
+        converter = HtmlToPptxConverter(adapter)
         await converter.convert_to_pptx(str(output_path), include_charts=True)
 
         # Stream file

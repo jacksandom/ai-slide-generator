@@ -9,12 +9,10 @@ __version__ = "0.1.0"
 __author__ = "Your Name"
 
 # Main exports
-from .core.chatbot import Chatbot
-from .tools.html_slides import HtmlDeck, SlideTheme
+from .tools.html_slides_agent import SlideDeckAgent, SlideTheme
 
 __all__ = [
-    "Chatbot", 
-    "HtmlDeck", 
+    "SlideDeckAgent", 
     "SlideTheme",
     "__version__",
 ]

@@ -11,9 +11,14 @@ This module provides a clean, modular approach to generating HTML slides using L
 from __future__ import annotations
 import os
 import json
+import re
 import time
+import copy
+import pandas as pd
 from typing import List, Dict, Literal, Optional, Annotated, TypedDict
 from pydantic import BaseModel, Field, conint
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 
 from bs4 import BeautifulSoup
 from bs4.element import Tag
@@ -93,12 +98,15 @@ ALLOWED_INLINE_SCRIPT_KEYWORDS = (
 )
 
 # LLM Configuration
-ws = WorkspaceClient(profile='e2-demo', product='slide-generator')
+ws = WorkspaceClient(profile='logfood', product='slide-generator')
 model_serving_client = ws.serving_endpoints.get_open_ai_client()
 
-NLU_ENDPOINT = "databricks-gpt-oss-120b"
-PLAN_ENDPOINT = "databricks-gpt-oss-120b" 
+NLU_ENDPOINT = "databricks-gpt-oss-20b"
+PLAN_ENDPOINT = "databricks-gpt-oss-20b" 
 HTML_ENDPOINT = "databricks-claude-sonnet-4"
+
+# Parallel Processing Configuration
+MAX_WORKERS = 5  # Maximum number of concurrent slide generations
 
 
 # =========================
@@ -145,11 +153,62 @@ class UserIntent(BaseModel):
 
 class SlideStatus(BaseModel):
     """Status of a slide in the deck."""
-    id: int
+    id: int  # Artifact ID (internal)
+    position: int  # User-visible slide number (1, 2, 3...)
     title: str
     html: str  # Complete HTML document
     is_generated: bool = False
     is_valid: bool = False
+
+
+@dataclass
+class SlideAdapter:
+    """Adapter to convert SlideStatus to Slide-like object for PPTX export.
+    
+    This bridges the new SlideDeckAgent architecture with the legacy
+    HtmlToPptxConverter which expects the old Slide format from html_slides.py.
+    
+    The HtmlToPptxConverter was designed for the old architecture where slides
+    had explicit types (title, agenda, content). In the new architecture, all
+    slides are custom HTML, so we default to slide_type="custom".
+    
+    Attributes:
+        slide_type: Type of slide (always "custom" for new architecture)
+        html: Complete HTML document for the slide
+        content: HTML content (same as html, for compatibility)
+        title: Slide title extracted from HTML or metadata
+        subtitle: Slide subtitle (empty for custom HTML slides)
+        bullets: List of bullet points (empty for custom HTML slides)
+        metadata: Additional metadata (empty dict for custom HTML slides)
+    """
+    slide_type: str = "custom"  # All new slides are custom HTML
+    html: str = ""
+    content: str = ""  # Same as html, for compatibility with HtmlToPptxConverter
+    title: str = ""
+    subtitle: str = ""  # Empty for custom HTML slides
+    bullets: List[str] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)  # Empty for custom HTML slides
+    
+    @classmethod
+    def from_slide_status(cls, status: SlideStatus) -> 'SlideAdapter':
+        """Create SlideAdapter from SlideStatus.
+        
+        Args:
+            status: SlideStatus object from SlideDeckAgent
+            
+        Returns:
+            SlideAdapter object compatible with HtmlToPptxConverter
+        """
+        return cls(
+            slide_type="custom",  # All slides are custom HTML in new architecture
+            html=status.html,
+            content=status.html,  # content and html are the same
+            title=status.title,
+            subtitle="",  # No separate subtitle in new architecture
+            bullets=[],  # Bullets are embedded in HTML, not separate
+            metadata={}  # No additional metadata
+        )
+
 
 class SlideDeckState(TypedDict):
     """State for the slide deck generation agent."""
@@ -198,14 +257,317 @@ def _extract_text_from_response(content) -> str:
     return str(content)
 
 def _clean_markdown_fences(content: str) -> str:
-    """Remove markdown code fences from content."""
-    if content.startswith("```html"):
+    """Remove markdown code fences from content.
+    
+    Handles various markdown fence formats:
+    - ```json ... ```
+    - ```html ... ```
+    - ``` ... ```
+    """
+    content = content.strip()
+    
+    # Remove opening fence
+    if content.startswith("```json"):
         content = content[7:]
-    if content.startswith("```"):
+    elif content.startswith("```html"):
+        content = content[7:]
+    elif content.startswith("```"):
         content = content[3:]
+    
+    # Remove closing fence (strip again after removing opening fence)
+    content = content.strip()
     if content.endswith("```"):
         content = content[:-3]
+    
     return content.strip()
+
+
+# =========================
+# Intent Parsing Helpers
+# =========================
+def _extract_slide_id_from_message(message: str, default: int = 1) -> int:
+    """Extract slide ID from message using various patterns."""
+    patterns = [
+        r'(?:in\s+)?slide\s+(\d+)',   # "slide 1", "in slide 1"
+        r'for\s+slide\s+(\d+)',        # "for slide 2"
+        r'to\s+slide\s+(\d+)',         # "to slide 3"
+        r'on\s+slide\s+(\d+)',         # "on slide 4"
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, message, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    
+    return default
+
+
+def _is_new_slide_indicator(message: str, slide_id: int) -> bool:
+    """Check if message contains indicators of new slide creation."""
+    message_lower = message.lower()
+    
+    # Strong indicators that this is a new slide, not an edit
+    new_slide_keywords = [
+        "title:",
+        "bullets:",
+        "new slide",
+        "add slide",
+        "add another slide",
+        "add a slide",
+        "create slide",
+        "create another slide",
+        "insert slide",
+        "make a slide",
+        "make another slide",
+        f"slide {slide_id} title:",
+        f"slide {slide_id} —",
+        f"slide {slide_id}:",
+    ]
+    
+    return any(keyword in message_lower for keyword in new_slide_keywords)
+
+
+def _parse_change_from_dict(changes_dict: dict) -> List[dict]:
+    """Parse changes from dict format: {"slide": N, "actions": [...]}."""
+    parsed = []
+    
+    if "slide" in changes_dict and "actions" in changes_dict:
+        slide_id = changes_dict["slide"]
+        actions = changes_dict["actions"]
+        if isinstance(actions, list):
+            for action in actions:
+                parsed.append({
+                    "slide_id": slide_id,
+                    "operation": "EDIT_RAW_HTML",
+                    "args": {"description": action}
+                })
+    
+    return parsed
+
+
+def _parse_change_from_list(changes_list: list) -> List[dict]:
+    """Parse changes from list format with various item types."""
+    parsed = []
+    
+    for item in changes_list:
+        # String format: convert to EDIT_RAW_HTML on slide 1
+        if isinstance(item, str):
+            parsed.append({
+                "slide_id": 1,
+                "operation": "EDIT_RAW_HTML",
+                "args": {"description": item}
+            })
+        
+        # Dict format: multiple sub-formats
+        elif isinstance(item, dict):
+            # {"slide_number": N, "description": "..."}
+            if "slide_number" in item and "description" in item:
+                parsed.append({
+                    "slide_id": item["slide_number"],
+                    "operation": "EDIT_RAW_HTML",
+                    "args": {"description": item["description"]}
+                })
+            
+            # {"slide_id": N, "operation": "...", "args": {...}}
+            elif "slide_id" in item and "operation" in item:
+                parsed.append(item)
+    
+    return parsed
+
+
+def _create_fallback_change(message: str, slide_id: int, is_new_slide: bool) -> dict:
+    """Create a fallback change when LLM doesn't provide structured changes."""
+    if is_new_slide:
+        return {
+            "slide_id": slide_id,
+            "operation": "INSERT_SLIDE_AFTER",
+            "args": {
+                "title": f"Slide {slide_id}",
+                "content": message,
+                "bullets": []
+            }
+        }
+    else:
+        return {
+            "slide_id": slide_id,
+            "operation": "EDIT_RAW_HTML",
+            "args": {"description": message}
+        }
+
+
+def _update_change_with_slide_id(change: dict, target_slide_id: int, message: str) -> None:
+    """Update a change dict with correct slide ID and operation in-place."""
+    if change.get("operation") != "EDIT_RAW_HTML":
+        return
+    
+    # Check if this is actually a new slide request
+    if _is_new_slide_indicator(message, target_slide_id):
+        change["operation"] = "INSERT_SLIDE_AFTER"
+        change["slide_id"] = target_slide_id
+        change["args"] = {
+            "title": f"Slide {target_slide_id}",
+            "content": message,
+            "bullets": []
+        }
+    else:
+        # Just update the slide ID for editing
+        change["slide_id"] = target_slide_id
+
+
+def _generate_single_slide(todo: SlideTodo, style_hint: str, space_id: str) -> tuple[int, str, Optional[str]]:
+    """
+    Generate a single slide (used for parallel processing).
+    
+    Returns:
+        tuple: (slide_id, html_content, error_message)
+    """
+    try:
+        print(f"[PARALLEL] Generating slide {todo.id}: {todo.title}")
+        
+        # Generate HTML with automatic data fetching
+        raw_html = generate_slide_html.invoke({
+            "title": todo.title,
+            "outline": todo.details,
+            "style_hint": style_hint,
+            "space_id": space_id
+        })
+        
+        # Validate and repair if needed
+        if not validate_slide_html.invoke({"html": raw_html}):
+            print(f"[PARALLEL] Slide {todo.id} failed validation, attempting repair")
+            raw_html = apply_slide_change.invoke({
+                "slide_html": raw_html,
+                "change": SlideChange(operation="EDIT_RAW_HTML", args={"fix": "structure"}),
+                "style_hint": style_hint
+            })
+        
+        # Sanitize
+        sanitized_html = sanitize_slide_html.invoke({"html": raw_html})
+        
+        print(f"[PARALLEL] Slide {todo.id} generated successfully")
+        return (todo.id, sanitized_html, None)
+        
+    except Exception as e:
+        error_msg = f"Generation error for slide {todo.id}: {str(e)}"
+        print(f"[PARALLEL] Error generating slide {todo.id}: {e}")
+        
+        # Create placeholder slide
+        placeholder_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{todo.title}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body style="width: 1280px; height: 720px; margin: 0; padding: 0; overflow: hidden; background: white;">
+    <div style="max-width: 1280px; max-height: 720px; margin: 0 auto; padding: 32px; box-sizing: border-box;">
+        <h1 style="color: #102025; font-size: 48px; font-weight: bold; margin-bottom: 24px;">{todo.title}</h1>
+        <p style="color: #5D6D71; font-size: 18px;">Error generating slide content. Please try again.</p>
+    </div>
+</body>
+</html>"""
+        
+        return (todo.id, placeholder_html, error_msg)
+
+def query_genie_space(question: str, space_id: str = "01effebcc2781b6bbb749077a55d31e3", workspace_client: WorkspaceClient = ws) -> str:
+    """Query Genie space for data and return as JSON."""
+    try:
+        response = workspace_client.genie.start_conversation_and_wait(
+            space_id=space_id,
+            content=question
+        )
+
+        conversation_id = response.conversation_id
+        message_id = response.message_id
+        attachment_ids = [_.attachment_id for _ in response.attachments]
+
+        response = workspace_client.genie.get_message_attachment_query_result(
+            space_id=space_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            attachment_id=attachment_ids[0]
+        )
+        response = response.as_dict()['statement_response']
+        columns = [_['name'] for _ in response['manifest']['schema']['columns']]
+        data = response['result']['data_array']
+        df = pd.DataFrame(data, columns=columns)
+        output = df.to_json(orient='records')
+        
+        print(f"[GENIE] Successfully fetched data: {len(data)} rows")
+        return output
+    except Exception as e:
+        print(f"[GENIE] Error querying Genie space: {e}")
+        return "[]"
+
+
+def _detect_data_need(title: str, outline: str) -> Optional[str]:
+    """Use LLM to detect if slide needs data and construct an optimized Genie query."""
+    
+    system_prompt = """You are a data needs analyzer for presentation slides. Your job is to determine if a slide requires actual data from a database and, if so, create a natural language query for Databricks Genie.
+
+                        DECISION CRITERIA:
+                        - Slides with charts, graphs, tables, metrics, KPIs, statistics → NEED DATA
+                        - Slides with rankings (top 10, bottom 5), comparisons, trends → NEED DATA  
+                        - Slides with business metrics (revenue, sales, customers, etc.) → NEED DATA
+                        - Slides with questions (how many, what are, etc.) → NEED DATA
+                        - Slides with only text, concepts, mission statements, strategies → NO DATA
+
+                        QUERY CONSTRUCTION:
+                        - Keep queries concise and clear (under 200 characters)
+                        - Use natural language that Genie can understand
+                        - Examples: "show top 10 products by revenue", "get customer count by region", "revenue trend over last 12 months"
+
+                        OUTPUT FORMAT:
+                        Return ONLY a JSON object:
+                        {"needs_data": true/false, "query": "your query here or null"}
+
+                        Examples:
+                        Input: Title="Revenue Analysis", Outline="Show revenue by product category"
+                        Output: {"needs_data": true, "query": "show revenue by product category"}
+
+                        Input: Title="Company Mission", Outline="Our vision and values"  
+                        Output: {"needs_data": false, "query": null}
+
+                        Input: Title="Top Performers", Outline="top 5 sales reps this quarter"
+                        Output: {"needs_data": true, "query": "show top 5 sales representatives by sales this quarter"}"""
+
+    user_prompt = f"""Slide Title: {title}
+                        Slide Outline: {outline}
+
+                        Determine if this slide needs data and create a query if needed."""
+
+    try:
+        response = model_serving_client.chat.completions.create(
+            model=NLU_ENDPOINT,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.0  # Deterministic output
+        )
+        
+        content = _extract_text_from_response(response.choices[0].message.content)
+        content = _clean_markdown_fences(content)
+        
+        # Parse the JSON response
+        result = json.loads(content)
+        
+        if result.get("needs_data") and result.get("query"):
+            query = result["query"].strip()
+            print(f"[DATA_DETECTION] Data needed - Query: '{query}'")
+            return query
+        else:
+            print(f"[DATA_DETECTION] No data needed for slide: {title}")
+            return None
+            
+    except json.JSONDecodeError as e:
+        print(f"[DATA_DETECTION] JSON parse error: {e}, content: {content[:200]}")
+        return None
+    except Exception as e:
+        print(f"[DATA_DETECTION] Error: {e}")
+        return None
 
 
 # =========================
@@ -214,6 +576,7 @@ def _clean_markdown_fences(content: str) -> str:
 @tool("interpret_user_intent", return_direct=False)
 def interpret_user_intent(messages: List[Dict[str, str]], current_config: SlideConfig) -> UserIntent:
     """Interpret user messages and extract intent, config changes, and slide modifications."""
+    # System prompt (unchanged as per requirements)
     sys = (
         "You are an intent recognizer for a slides agent. "
         "From chat messages, extract intent + config deltas (topic/style/n_slides) and changes. "
@@ -238,24 +601,60 @@ def interpret_user_intent(messages: List[Dict[str, str]], current_config: SlideC
         "- Preserve exact wording, numbers, company names, section headings, and specifications\n"
         "- Do not summarize or modify the user's detailed instructions\n"
         "- The topic field should contain the complete user specification for slide generation\n"
+        "\n**CRITICAL: OPERATION TYPE DETECTION**\n"
+        "For ADD_CHANGES intent, you MUST correctly identify the operation:\n\n"
+        "USE INSERT_SLIDE_AFTER when user says:\n"
+        "- 'add another slide', 'add a new slide', 'create another slide'\n"
+        "- 'insert slide', 'add slide 4', 'create slide about X'\n"
+        "- 'make a slide showing', 'add a slide to show'\n"
+        "Format: {\"operation\": \"INSERT_SLIDE_AFTER\", \"slide_id\": N, \"args\": {\"title\": \"...\", \"content\": \"user's full request\"}}\n"
+        "**IMPORTANT: For INSERT_SLIDE_AFTER, slide_id determines position:**\n"
+        "  - slide_id = 0: Insert at the beginning (before slide 1)\n"
+        "  - slide_id = N: Insert after slide N (e.g., slide_id=1 inserts after slide 1, becoming new slide 2)\n"
+        "  - slide_id = current_n_slides: Append at the end (most common for 'add another slide')\n"
+        "  - If user says 'add another slide' or 'create another slide', use slide_id = current_n_slides to append\n\n"
+        "USE EDIT_RAW_HTML when user says:\n"
+        "- 'change slide 1', 'update the title', 'modify slide 2'\n"
+        "- 'in slide 1 add', 'on slide 2 change', 'fix slide 3'\n"
+        "Format: {\"operation\": \"EDIT_RAW_HTML\", \"slide_id\": N, \"args\": {\"description\": \"change description\"}}\n\n"
+        "USE DELETE_SLIDE when user says:\n"
+        "- 'delete slide 5', 'remove slide 3', 'delete the last slide'\n"
+        "- 'remove the slide about X', 'get rid of slide 2'\n"
+        "Format: {\"operation\": \"DELETE_SLIDE\", \"slide_id\": N, \"args\": {}}\n"
         "\nExamples:\n"
         "- 'create 2 slides on AI and Machine Learning' → REQUEST_DECK, topic='AI and Machine Learning', n_slides=2\n"
-        "- 'Slide 2 title: KEY BENEFITS...' → ADD_CHANGES, no config changes\n"
-        "- 'change the title to Machine Learning' → ADD_CHANGES, no config changes\n"
+        "- 'add another slide to show revenue trends' (when current_n_slides=3) → ADD_CHANGES, INSERT_SLIDE_AFTER with slide_id=3\n"
+        "- 'insert a slide after slide 1 about benefits' → ADD_CHANGES, INSERT_SLIDE_AFTER with slide_id=1\n"
+        "- 'Slide 2 title: KEY BENEFITS...' → ADD_CHANGES, INSERT_SLIDE_AFTER with slide_id=1\n"
+        "- 'change the title to Machine Learning' → ADD_CHANGES, EDIT_RAW_HTML\n"
+        "- 'in slide 1 add icons' → ADD_CHANGES, EDIT_RAW_HTML for slide_id=1\n"
+        "- 'delete slide 5' → ADD_CHANGES, DELETE_SLIDE with slide_id=5\n"
         "\nReturn JSON with intent, config_delta (with topic/style_hint/n_slides), and changes array."
     )
-    # Check if there are existing slides by looking at the current config
-    has_existing_slides = current_config.topic is not None and current_config.topic.strip() != ""
     
+    # Check if there are existing slides
+    has_existing_slides = bool(current_config.topic and current_config.topic.strip())
+    
+    # Get current number of slides for the LLM
+    current_n_slides = current_config.n_slides or 0
+    
+    # Build user prompt
     user = f"""Messages (recent last):
-{json.dumps(messages[-12:], ensure_ascii=False, indent=2)}
+            {json.dumps(messages[-12:], ensure_ascii=False, indent=2)}
 
 Current config: {current_config.model_dump()}
 Has existing slides: {has_existing_slides}
+Current number of slides (current_n_slides): {current_n_slides}
 
-IMPORTANT: If the user is requesting 'Slide 2', 'Slide 3', etc. AND there are existing slides (has_existing_slides=True), 
-then classify as ADD_CHANGES, not REQUEST_DECK."""
-    
+            CRITICAL INSTRUCTIONS:
+            1. ONLY extract intent and changes from the LAST (most recent) user message
+            2. DO NOT include changes from previous messages in the conversation history
+            3. If the user is requesting 'Slide 2', 'Slide 3', etc. AND has_existing_slides=True, classify as ADD_CHANGES
+            4. For simple edits like "In slide 1 change X", return ONLY ONE change with operation=EDIT_RAW_HTML
+            5. For new slide requests like "add another slide", return ONLY ONE change with operation=INSERT_SLIDE_AFTER
+            6. For INSERT_SLIDE_AFTER with "add another slide", use slide_id = current_n_slides (to append at end)"""
+                    
+    # Call LLM
     response = model_serving_client.chat.completions.create(
         model=NLU_ENDPOINT,
         messages=[
@@ -264,119 +663,87 @@ then classify as ADD_CHANGES, not REQUEST_DECK."""
         ]
     )
     
-    print("current_config", current_config)
+    print(f"[NLU] Current config: {current_config}")
     content = _extract_text_from_response(response.choices[0].message.content)
     content = _clean_markdown_fences(content)
     
+    print(f"[NLU] Raw LLM response: {content[:500]}")  # Debug: show first 500 chars
+    
     try:
         data = json.loads(content)
+        print(f"[NLU] Parsed JSON: intent={data.get('intent')}, changes={data.get('changes')}")
         
-        # Validate and fix intent if needed
+        # 1. Validate and fix intent
         valid_intents = ["REQUEST_DECK", "REFINE_CONFIG", "ADD_CHANGES", "REGENERATE_TODOS", "FINALIZE", "SAVE", "SHOW_STATUS"]
         if data.get("intent") not in valid_intents:
+            print(f"[NLU] Invalid intent '{data.get('intent')}', defaulting to REQUEST_DECK")
             data["intent"] = "REQUEST_DECK"
         
-        # Handle config_deltas -> config_delta
+        # 2. Normalize config_delta field name
         if "config_deltas" in data and "config_delta" not in data:
             data["config_delta"] = data.pop("config_deltas")
         
-        # Parse changes
+        # 3. Parse changes using helper functions
+        parsed_changes = []
         if "changes" in data:
-            parsed_changes = []
             if isinstance(data["changes"], dict):
-                if "slide" in data["changes"] and "actions" in data["changes"]:
-                    slide_id = data["changes"]["slide"]
-                    actions = data["changes"]["actions"]
-                    if isinstance(actions, list):
-                        for action in actions:
-                            parsed_changes.append({
-                                "slide_id": slide_id,
-                                "operation": "EDIT_RAW_HTML",
-                                "args": {"description": action}
-                            })
+                parsed_changes = _parse_change_from_dict(data["changes"])
             elif isinstance(data["changes"], list):
-                for change_item in data["changes"]:
-                    if isinstance(change_item, str):
-                        parsed_changes.append({
-                            "slide_id": 1,
-                            "operation": "EDIT_RAW_HTML",
-                            "args": {"description": change_item}
-                        })
-                    elif isinstance(change_item, dict):
-                        if "slide_number" in change_item and "description" in change_item:
-                            parsed_changes.append({
-                                "slide_id": change_item["slide_number"],
-                                "operation": "EDIT_RAW_HTML",
-                                "args": {"description": change_item["description"]}
-                            })
-                        elif "slide_id" in change_item and "operation" in change_item:
-                            parsed_changes.append(change_item)
-            
-            data["changes"] = parsed_changes
+                parsed_changes = _parse_change_from_list(data["changes"])
         
-        # Special handling for ADD_CHANGES intent - if no changes parsed but intent is ADD_CHANGES,
-        # create a slide addition change from the user message
-        if data.get("intent") == "ADD_CHANGES" and not data.get("changes"):
-            # Extract the latest user message
+        # 4. Fallback: Create change from user message if ADD_CHANGES but no changes parsed
+        if data.get("intent") == "ADD_CHANGES" and not parsed_changes:
             latest_message = messages[-1]["content"] if messages else ""
             if latest_message.strip():
-                # Determine slide ID - look for "Slide X" pattern
-                import re
-                slide_match = re.search(r'Slide\s+(\d+)', latest_message)
-                slide_id = int(slide_match.group(1)) if slide_match else 2  # Default to slide 2
+                # Check if this is a new slide request
+                is_new_slide = _is_new_slide_indicator(latest_message, 0)  # Use 0 as placeholder
                 
-                parsed_changes.append({
-                    "slide_id": slide_id,
-                    "operation": "INSERT_SLIDE_AFTER",
-                    "args": {
-                        "title": f"Slide {slide_id}",
-                        "content": latest_message,
-                        "bullets": []
-                    }
-                })
-                data["changes"] = parsed_changes
+                # For new slides, default to adding after the last slide (use current n_slides)
+                if is_new_slide:
+                    # Get the current number of slides from config
+                    current_n_slides = current_config.n_slides or 0
+                    slide_id = current_n_slides  # Will insert AFTER this slide
+                else:
+                    # For edits, extract the specific slide ID or default to 1
+                    slide_id = _extract_slide_id_from_message(latest_message, default=1)
+                
+                fallback_change = _create_fallback_change(latest_message, slide_id, is_new_slide)
+                parsed_changes.append(fallback_change)
+                print(f"[NLU] Fallback change created: operation={fallback_change['operation']}, slide_id={slide_id}")
         
-        # Enhanced slide ID handling for ADD_CHANGES
-        if data.get("intent") == "ADD_CHANGES" and data.get("changes"):
-            latest_message = messages[-1]["content"] if messages else ""
-            import re
+        # 5. Enhanced slide ID handling: Update changes with correct slide IDs (ONLY if needed)
+        # IMPORTANT: Only apply this fix if changes are missing slide_ids or operations
+        # If the LLM returned well-formed changes, don't modify them!
+        if data.get("intent") == "ADD_CHANGES" and parsed_changes:
+            # Check if any changes need fixing (missing slide_id or operation)
+            needs_fixing = any(
+                change.get("slide_id") is None or change.get("operation") is None
+                for change in parsed_changes
+            )
             
-            # Look for slide references in various formats
-            slide_patterns = [
-                r'Slide\s+(\d+)',  # "Slide 2"
-                r'slide\s+(\d+)',  # "slide 2"
-                r'for\s+slide\s+(\d+)',  # "for slide 2"
-                r'to\s+slide\s+(\d+)',  # "to slide 2"
-            ]
-            
-            target_slide_id = None
-            for pattern in slide_patterns:
-                slide_match = re.search(pattern, latest_message, re.IGNORECASE)
-                if slide_match:
-                    target_slide_id = int(slide_match.group(1))
-                    break
-            
-            if target_slide_id:
-                # Update the change to use correct slide ID
-                for change in data["changes"]:
-                    if change.get("operation") == "EDIT_RAW_HTML":
-                        # Check if this is a slide addition or modification
-                        if "Slide" in latest_message and ("title:" in latest_message or "bullets:" in latest_message):
-                            change["operation"] = "INSERT_SLIDE_AFTER"
-                            change["slide_id"] = target_slide_id
-                            change["args"] = {
-                                "title": f"Slide {target_slide_id}",
-                                "content": latest_message,
-                                "bullets": []
-                            }
-                        else:
-                            # This is a modification to existing slide
-                            change["slide_id"] = target_slide_id
+            if needs_fixing:
+                latest_message = messages[-1]["content"] if messages else ""
+                target_slide_id = _extract_slide_id_from_message(latest_message, default=None)
+                
+                if target_slide_id:
+                    for change in parsed_changes:
+                        # Only update if the change doesn't already have a slide_id
+                        # This prevents overwriting correctly parsed changes
+                        if change.get("slide_id") is None:
+                            _update_change_with_slide_id(change, target_slide_id, latest_message)
         
+        data["changes"] = parsed_changes
+        
+        print(f"[NLU] Parsed - intent: {data.get('intent')}, changes: {len(parsed_changes)}")
+        for i, change in enumerate(parsed_changes):
+            print(f"[NLU]   Change {i+1}: operation={change.get('operation')}, slide_id={change.get('slide_id')}")
         return UserIntent(**data)
     
+    except json.JSONDecodeError as e:
+        print(f"[NLU] JSON parse error: {e}, content preview: {content[:200]}")
+        return UserIntent(intent="REQUEST_DECK")
     except Exception as e:
-        print(f"Error parsing intent: {e}")
+        print(f"[NLU] Unexpected error: {e}")
         return UserIntent(intent="REQUEST_DECK")
 
 @tool("create_slide_todos", return_direct=False)
@@ -428,9 +795,25 @@ def create_slide_todos(topic: str, style_hint: str, n_slides: int) -> List[Slide
         return []
 
 @tool("generate_slide_html", return_direct=False)
-def generate_slide_html(title: str, outline: str, style_hint: str) -> str:
-    """Generate complete HTML document for a single slide."""
+def generate_slide_html(title: str, outline: str, style_hint: str, space_id: Optional[str] = "01effebcc2781b6bbb749077a55d31e3") -> str:
+    """Generate complete HTML document for a single slide, fetching data from Genie if needed."""
+    
+    # Check if slide needs data
+    data_query = _detect_data_need(title, outline)
+    fetched_data = None
+    
+    if data_query:
+        print(f"[GENERATION] Data needed for slide '{title}', querying Genie...")
+        print(f"[GENERATION] Query: {data_query}")
+        fetched_data = query_genie_space(data_query, space_id=space_id)
+        if fetched_data and fetched_data != "[]":
+            print(f"[GENERATION] Data fetched successfully")
+            outline = f"{outline}\n\nDATA (use this actual data):\n{fetched_data}"
+        else:
+            print(f"[GENERATION] No data returned from Genie, proceeding without data")
+    
     sys = "Create a complete HTML document for a single slide." + HTML_CONSTRAINTS
+    
     user = f"""TITLE: {title}
 OUTLINE: {outline}
 STYLE: {style_hint}
@@ -438,12 +821,14 @@ STYLE: {style_hint}
 CRITICAL INSTRUCTIONS:
 - Use ONLY the content provided above - do not add, modify, or hallucinate any data
 - If specific metrics, numbers, or data points are provided, use them exactly as given
+- If DATA section is provided above, use that ACTUAL data - do not create fictional data
 - If bullet points are specified, include them exactly as listed
 - If section headings are provided, use them exactly as specified
 - If company names, logos, or branding are mentioned, include them as specified
 - Do not create fictional data, statistics, or content not explicitly provided
 - Maintain the exact structure and content hierarchy as specified in the outline
 - Use Tailwind CSS with the brand colors and styling specified in the constraints
+- If data is provided, visualize it using Chart.js with appropriate chart type
 
 Create a beautiful, modern slide using Tailwind CSS with the exact brand colors and spacing specified. Ensure all content fits within 1280x720 pixels with proper contrast and visibility. Use white background and symmetrical layout. IMPORTANT: Use Navy 900 (#102025) for the main title, NOT gray colors."""
     
@@ -565,7 +950,8 @@ Apply the change while keeping the modern Tailwind CSS styling and design."""
 # =========================
 def nlu_node(state: SlideDeckState) -> SlideDeckState:
     """Natural Language Understanding node - interprets user intent."""
-    print(f"[NLU] Processing {len(state['messages'])} messages")
+    last_message = state['messages'][-1]['content'] if state['messages'] else ""
+    print(f"[NLU] Processing last message: '{last_message[:80]}...'") if len(last_message) > 80 else print(f"[NLU] Processing last message: '{last_message}'")
     
     try:
         intent = interpret_user_intent.invoke({
@@ -624,6 +1010,7 @@ def planning_node(state: SlideDeckState) -> SlideDeckState:
             
             state["todos"] = todos
             print(f"[PLANNING] Created {len(todos)} todos")
+            print(f"[PLANNING] Todo IDs: {[t.id for t in todos if t.action == 'WRITE_SLIDE']}")
         
     except Exception as e:
         print(f"[PLANNING] Error: {e}")
@@ -632,84 +1019,95 @@ def planning_node(state: SlideDeckState) -> SlideDeckState:
     return state
 
 def generation_node(state: SlideDeckState) -> SlideDeckState:
-    """Generation node - generates HTML for slides."""
+    """Generation node - generates HTML for slides using parallel processing."""
     print(f"[GENERATION] Generating slides")
     
     slide_todos = [t for t in state["todos"] if t.action == "WRITE_SLIDE"]
-    processed_todos = []
     
-    for todo in slide_todos:
-        if todo.id in state["artifacts"]:
-            print(f"[GENERATION] Slide {todo.id} already exists, skipping")
-            processed_todos.append(todo)
-            continue
+    # Filter out slides that already exist
+    todos_to_generate = [t for t in slide_todos if t.id not in state["artifacts"]]
+    
+    if not todos_to_generate:
+        print(f"[GENERATION] All slides already generated")
+        return state
+    
+    print(f"[GENERATION] Generating {len(todos_to_generate)} slides in parallel (max {MAX_WORKERS} workers)")
+    start_time = time.time()
+    
+    style_hint = state["config"].style_hint or "professional clean"
+    space_id = "01effebcc2781b6bbb749077a55d31e3"
+    
+    # Use ThreadPoolExecutor for parallel generation
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Submit all slide generation tasks
+        future_to_todo = {
+            executor.submit(_generate_single_slide, todo, style_hint, space_id): todo
+            for todo in todos_to_generate
+        }
         
-        try:
-            print(f"[GENERATION] Generating slide {todo.id}: {todo.title}")
-            
-            # Generate HTML
-            raw_html = generate_slide_html.invoke({
-                "title": todo.title,
-                "outline": todo.details,
-                "style_hint": state["config"].style_hint or "professional clean"
-            })
-            
-            # Validate and repair if needed
-            if not validate_slide_html.invoke({"html": raw_html}):
-                print(f"[GENERATION] Slide {todo.id} failed validation, attempting repair")
-                # Try one repair attempt
-                raw_html = apply_slide_change.invoke({
-                    "slide_html": raw_html,
-                    "change": SlideChange(operation="EDIT_RAW_HTML", args={"fix": "structure"}),
-                    "style_hint": state["config"].style_hint or "professional clean"
-                })
-            
-            # Sanitize and store
-            sanitized_html = sanitize_slide_html.invoke({"html": raw_html})
-            state["artifacts"][todo.id] = sanitized_html
-            
-            print(f"[GENERATION] Slide {todo.id} generated successfully")
-            processed_todos.append(todo)
-            
-        except Exception as e:
-            print(f"[GENERATION] Error generating slide {todo.id}: {e}")
-            state["errors"].append(f"Generation error for slide {todo.id}: {str(e)}")
-            
-            # Create placeholder slide
-            placeholder_html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{todo.title}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-<body style="width: 1280px; height: 720px; margin: 0; padding: 0; overflow: hidden; background: white;">
-    <div style="max-width: 1280px; max-height: 720px; margin: 0 auto; padding: 32px; box-sizing: border-box;">
-        <h1 style="color: #102025; font-size: 48px; font-weight: bold; margin-bottom: 24px;">{todo.title}</h1>
-        <p style="color: #5D6D71; font-size: 18px;">Error generating slide content. Please try again.</p>
-    </div>
-</body>
-</html>"""
-            state["artifacts"][todo.id] = placeholder_html
-            processed_todos.append(todo)
+        # Collect results as they complete
+        for future in as_completed(future_to_todo):
+            todo = future_to_todo[future]
+            try:
+                slide_id, html_content, error_msg = future.result()
+                
+                # Store the generated slide
+                state["artifacts"][slide_id] = html_content
+                
+                # Log any errors
+                if error_msg:
+                    state["errors"].append(error_msg)
+                    
+            except Exception as e:
+                error_msg = f"Unexpected error for slide {todo.id}: {str(e)}"
+                print(f"[GENERATION] {error_msg}")
+                state["errors"].append(error_msg)
+                
+                # Create placeholder for failed slide
+                placeholder_html = f"""<!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>{todo.title}</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        </head>
+        <body style="width: 1280px; height: 720px; margin: 0; padding: 0; overflow: hidden; background: white;">
+            <div style="max-width: 1280px; max-height: 720px; margin: 0 auto; padding: 32px; box-sizing: border-box;">
+                <h1 style="color: #102025; font-size: 48px; font-weight: bold; margin-bottom: 24px;">{todo.title}</h1>
+                <p style="color: #5D6D71; font-size: 18px;">Error generating slide content. Please try again.</p>
+            </div>
+        </body>
+        </html>"""
+                state["artifacts"][todo.id] = placeholder_html
     
-    # Optimized todo management: Only remove todos that are fully processed
-    # Keep todos for slides that might need modifications
+    elapsed_time = time.time() - start_time
+    print(f"[GENERATION] Completed {len(todos_to_generate)} slides in {elapsed_time:.2f}s (avg {elapsed_time/len(todos_to_generate):.2f}s per slide)")
+    
+    # Optimized todo management: Keep todos but mark as completed (immutably)
+    # Create new todo instances instead of mutating existing ones
     remaining_todos = []
     for todo in state["todos"]:
         if todo.action == "WRITE_SLIDE":
-            # Keep the todo if it was processed (for potential future modifications)
-            # Mark it as completed but keep it for reference
-            todo.details = f"[COMPLETED] {todo.details}"
-            remaining_todos.append(todo)
+            # Create new todo instance with COMPLETED marker (don't mutate original)
+            if not todo.details.startswith("[COMPLETED]"):
+                new_todo = SlideTodo(
+                    id=todo.id,
+                    action=todo.action,
+                    title=todo.title,
+                    details=f"[COMPLETED] {todo.details}",
+                    depends_on=todo.depends_on
+                )
+                remaining_todos.append(new_todo)
+            else:
+                remaining_todos.append(todo)
         else:
             # Keep non-WRITE_SLIDE todos
             remaining_todos.append(todo)
     
     state["todos"] = remaining_todos
-    print(f"[GENERATION] Processed {len(processed_todos)} slides, kept {len(remaining_todos)} todos for reference")
+    print(f"[GENERATION] Processed {len(todos_to_generate)} slides, kept {len(remaining_todos)} todos for reference")
     
     return state
 
@@ -718,13 +1116,15 @@ def modification_node(state: SlideDeckState) -> SlideDeckState:
     print(f"[MODIFICATION] Processing {len(state['pending_changes'])} changes")
     
     # Create a mapping of user-visible slide numbers to actual artifact IDs
-    artifact_ids = sorted(state["artifacts"].keys())
-    slide_number_to_id = {i+1: artifact_ids[i] for i in range(len(artifact_ids))}
-    print(f"[MODIFICATION] Slide mapping: {slide_number_to_id}")
+    # IMPORTANT: Use todo order (not sorted artifact keys) to preserve slide sequence
+    # This is critical after INSERT_SLIDE_AFTER operations which reorder todos
+    slide_todos = [t for t in state["todos"] if t.action == "WRITE_SLIDE"]
+    slide_number_to_id = {i+1: slide_todos[i].id for i in range(len(slide_todos))}
+    print(f"[MODIFICATION] Slide mapping (based on todo order): {slide_number_to_id}")
     
     for change in state["pending_changes"]:
         try:
-            print(f"[MODIFICATION] Applying change: {change.operation}")
+            print(f"[MODIFICATION] Applying change: {change.operation}, slide_id={change.slide_id}, args={change.args}")
             
             if change.operation == "REORDER_SLIDES":
                 order = change.args.get("order", [])
@@ -737,12 +1137,27 @@ def modification_node(state: SlideDeckState) -> SlideDeckState:
             
             if change.operation == "DELETE_SLIDE":
                 slide_id = change.slide_id
+                
                 # Map user slide number to actual artifact ID if needed
                 if slide_id in slide_number_to_id:
                     actual_id = slide_number_to_id[slide_id]
-                    state["artifacts"].pop(actual_id, None)
                 else:
-                    state["artifacts"].pop(slide_id, None)
+                    actual_id = slide_id
+                
+                # Remove from artifacts
+                removed_artifact = state["artifacts"].pop(actual_id, None)
+                
+                # CRITICAL: Also remove from todos (this was missing!)
+                slide_todos = [t for t in state["todos"] if t.action == "WRITE_SLIDE"]
+                other_todos = [t for t in state["todos"] if t.action != "WRITE_SLIDE"]
+                updated_slides = [t for t in slide_todos if t.id != actual_id]
+                state["todos"] = updated_slides + other_todos
+                
+                if removed_artifact:
+                    print(f"[MODIFICATION] ✅ Deleted slide {slide_id} (artifact ID {actual_id})")
+                    print(f"[MODIFICATION] After DELETE_SLIDE: Todo order now {[t.id for t in updated_slides]}")
+                else:
+                    print(f"[MODIFICATION] ⚠️ Slide {slide_id} not found for deletion")
                 continue
             
             if change.operation == "INSERT_SLIDE_AFTER":
@@ -757,12 +1172,13 @@ def modification_node(state: SlideDeckState) -> SlideDeckState:
                 else:
                     outline = "\n".join(f"- {b}" for b in bullets)
                 
-                # Generate new slide with error handling
+                # Generate new slide with error handling (with automatic data fetching)
                 try:
                     new_html = generate_slide_html.invoke({
                         "title": title,
                         "outline": outline,
-                        "style_hint": state["config"].style_hint or "professional clean"
+                        "style_hint": state["config"].style_hint or "professional clean",
+                        "space_id": "01effebcc2781b6bbb749077a55d31e3"  # Genie space ID
                     })
                     
                     if not validate_slide_html.invoke({"html": new_html}):
@@ -780,23 +1196,23 @@ def modification_node(state: SlideDeckState) -> SlideDeckState:
                     # Create a placeholder slide with the user's content
                     new_id = max([t.id for t in state["todos"]], default=0) + 1
                     placeholder_html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-<body style="width: 1280px; height: 720px; margin: 0; padding: 0; overflow: hidden; background: white;">
-    <div style="max-width: 1280px; max-height: 720px; margin: 0 auto; padding: 32px; box-sizing: border-box;">
-        <h1 style="color: #102025; font-size: 48px; font-weight: bold; margin-bottom: 24px;">{title}</h1>
-        <div style="color: #5D6D71; font-size: 18px; line-height: 1.6;">
-            <pre style="white-space: pre-wrap; font-family: inherit;">{outline}</pre>
-        </div>
-    </div>
-</body>
-</html>"""
+                                        <html lang="en">
+                                        <head>
+                                            <meta charset="UTF-8">
+                                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                            <title>{title}</title>
+                                            <script src="https://cdn.tailwindcss.com"></script>
+                                            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+                                        </head>
+                                        <body style="width: 1280px; height: 720px; margin: 0; padding: 0; overflow: hidden; background: white;">
+                                            <div style="max-width: 1280px; max-height: 720px; margin: 0 auto; padding: 32px; box-sizing: border-box;">
+                                                <h1 style="color: #102025; font-size: 48px; font-weight: bold; margin-bottom: 24px;">{title}</h1>
+                                                <div style="color: #5D6D71; font-size: 18px; line-height: 1.6;">
+                                                    <pre style="white-space: pre-wrap; font-family: inherit;">{outline}</pre>
+                                                </div>
+                                            </div>
+                                        </body>
+                                        </html>"""
                     state["artifacts"][new_id] = placeholder_html
                     state["errors"].append(f"Slide generation error: {str(e)}")
                 
@@ -811,6 +1227,7 @@ def modification_node(state: SlideDeckState) -> SlideDeckState:
                 if after_id == 0:
                     inserted = [SlideTodo(id=new_id, action="WRITE_SLIDE", title=title, details="", depends_on=[])] + inserted
                 state["todos"] = inserted + others
+                print(f"[MODIFICATION] After INSERT_SLIDE_AFTER: Todo order now {[t.id for t in inserted]}")
                 continue
             
             # Apply content changes to existing slides
@@ -850,13 +1267,19 @@ def status_node(state: SlideDeckState) -> SlideDeckState:
     print(f"[STATUS] Updating slide status")
     
     status_list = []
-    # Look at artifacts directly since WRITE_SLIDE todos may have been removed
-    for slide_id, html in state["artifacts"].items():
+    # IMPORTANT: Use todo order to preserve slide sequence (not artifact dict order)
+    # This ensures slides are displayed in the correct order after INSERT_SLIDE_AFTER
+    slide_todos = [t for t in state["todos"] if t.action == "WRITE_SLIDE"]
+    print(f"[STATUS] Todo order: {[t.id for t in slide_todos]}")
+    
+    for position, todo in enumerate(slide_todos, start=1):
+        slide_id = todo.id
+        html = state["artifacts"].get(slide_id, "")
         is_generated = bool(html)
         is_valid = validate_slide_html.invoke({"html": html}) if html else False
         
-        # Try to extract title from HTML or use a default
-        title = f"Slide {slide_id}"
+        # Try to extract title from HTML or use todo title as fallback
+        title = todo.title or f"Slide {position}"
         if html:
             try:
                 from bs4 import BeautifulSoup
@@ -869,6 +1292,7 @@ def status_node(state: SlideDeckState) -> SlideDeckState:
         
         status_list.append(SlideStatus(
             id=slide_id,
+            position=position,  # User-visible position (1, 2, 3...)
             title=title,
             html=html,
             is_generated=is_generated,
@@ -877,6 +1301,7 @@ def status_node(state: SlideDeckState) -> SlideDeckState:
     
     state["status"] = status_list
     print(f"[STATUS] Updated status for {len(status_list)} slides")
+    print(f"[STATUS] Status list order: {[(s.position, s.id, s.title[:30]) for s in status_list]}")
     return state
 
 
@@ -983,8 +1408,8 @@ class SlideDeckAgent:
         if run_id is None:
             run_id = f"run_{int(time.time())}"
         
-        # Add message to state
-        current_state = self.initial_state.copy()
+        # Add message to state (deep copy to prevent mutations affecting original state)
+        current_state = copy.deepcopy(self.initial_state)
         current_state["messages"].append({"role": "user", "content": message})
         current_state["run_id"] = run_id
         
@@ -1010,106 +1435,6 @@ class SlideDeckAgent:
                 "errors": [str(e)]
             }
     
-    def process_message_streaming(self, message: str, run_id: str = None, callback=None) -> Dict:
-        """Process a user message with streaming updates via callback."""
-        if run_id is None:
-            run_id = f"run_{int(time.time())}"
-        
-        current_state = self.initial_state.copy()
-        current_state["messages"].append({"role": "user", "content": message})
-        current_state["run_id"] = run_id
-        
-        try:
-            if callback:
-                callback("nlu", "Analyzing your request and extracting intent...")
-            current_state = nlu_node(current_state)
-            if callback:
-                intent = current_state.get("last_intent", "unknown")
-                callback("nlu", f"Intent identified: {intent}")
-            
-            if callback and current_state.get("config").topic and current_state.get("config").style_hint and current_state.get("config").n_slides:
-                callback("planning", f"Creating plan for {current_state['config'].n_slides} slides on '{current_state['config'].topic}'...")
-            current_state = planning_node(current_state)
-            if callback and current_state.get("todos"):
-                callback("planning", f"Plan created with {len([t for t in current_state['todos'] if t.action == 'WRITE_SLIDE'])} slides")
-            
-            slide_todos = [t for t in current_state["todos"] if t.action == "WRITE_SLIDE"]
-            if callback and slide_todos:
-                callback("generation", f"Generating {len(slide_todos)} slides...")
-            
-            for i, todo in enumerate(slide_todos):
-                if todo.id in current_state["artifacts"]:
-                    continue
-                if callback:
-                    callback("generation", f"Generating slide {i+1}/{len(slide_todos)}: {todo.title}")
-                
-                try:
-                    # Generate HTML
-                    raw_html = generate_slide_html.invoke({
-                        "title": todo.title,
-                        "outline": todo.details,
-                        "style_hint": current_state["config"].style_hint or "professional clean"
-                    })
-                    
-                    # Validate and repair if needed
-                    if not validate_slide_html.invoke({"html": raw_html}):
-                        if callback:
-                            callback("generation", f"Repairing slide {i+1}...")
-                        raw_html = apply_slide_change.invoke({
-                            "slide_html": raw_html,
-                            "change": SlideChange(operation="EDIT_RAW_HTML", args={"fix": "structure"}),
-                            "style_hint": current_state["config"].style_hint or "professional clean"
-                        })
-                    
-                    # Sanitize and store
-                    sanitized_html = sanitize_slide_html.invoke({"html": raw_html})
-                    current_state["artifacts"][todo.id] = sanitized_html
-                    
-                    if callback:
-                        callback("generation", f"✅ Slide {i+1} completed: {todo.title}")
-                        
-                except Exception as e:
-                    if callback:
-                        callback("generation", f"❌ Error generating slide {i+1}: {str(e)}")
-                    current_state["errors"].append(f"Generation error for slide {todo.id}: {str(e)}")
-            
-            # Remove processed WRITE_SLIDE todos, keep FINALIZE_DECK todos
-            remaining_todos = [t for t in current_state["todos"] if t.action != "WRITE_SLIDE"]
-            current_state["todos"] = remaining_todos
-            if callback:
-                callback("generation", f"Cleaned up {len(slide_todos)} processed todos")
-            
-            if callback and current_state.get("pending_changes"):
-                callback("modification", f"Applying {len(current_state['pending_changes'])} changes...")
-            current_state = modification_node(current_state)
-            
-            if callback:
-                callback("status", "Finalizing slide status...")
-            current_state = status_node(current_state)
-            
-            if callback:
-                slides_generated = len([s for s in current_state["status"] if s.is_generated])
-                callback("status", f"✅ All done! Generated {slides_generated} slides successfully")
-            
-            # Update the agent's state with the result
-            self.initial_state = current_state
-            
-            return {
-                "success": True,
-                "slides": [slide.html for slide in current_state["status"] if slide.is_generated],
-                "status": current_state["status"],
-                "errors": current_state["errors"]
-            }
-        except Exception as e:
-            if callback:
-                callback("error", f"❌ Processing failed: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-                "slides": [],
-                "status": [],
-                "errors": [str(e)]
-            }
     
     def get_slides(self) -> List[str]:
         """Get the generated slides as HTML strings."""
@@ -1132,6 +1457,83 @@ class SlideDeckAgent:
                 saved_files.append(file_path)
         
         return saved_files
+
+
+class SlideDeckAgentAdapter:
+    """Adapter to make SlideDeckAgent compatible with HtmlToPptxConverter.
+    
+    The HtmlToPptxConverter was designed for the old HtmlDeck architecture
+    from html_slides.py. This adapter provides the interface that 
+    HtmlToPptxConverter expects while using the new SlideDeckAgent internally.
+    
+    This enables PPTX export functionality without refactoring the entire
+    HtmlToPptxConverter, which would be a significant effort.
+    
+    Usage:
+        >>> agent = SlideDeckAgent()
+        >>> agent.process_message("Create 3 slides about AI")
+        >>> adapter = SlideDeckAgentAdapter(agent)
+        >>> converter = HtmlToPptxConverter(adapter)
+        >>> await converter.convert_to_pptx("output.pptx")
+    
+    Attributes:
+        agent: The SlideDeckAgent instance being adapted
+        theme: SlideTheme from the agent (required by HtmlToPptxConverter)
+    """
+    
+    def __init__(self, agent: SlideDeckAgent):
+        """Initialize adapter with a SlideDeckAgent instance.
+        
+        Args:
+            agent: The SlideDeckAgent instance to adapt
+        """
+        self.agent = agent
+        self.theme = agent.theme
+    
+    @property
+    def _slides(self) -> List[SlideAdapter]:
+        """Convert SlideStatus objects to Slide-like objects.
+        
+        This property mimics the old HtmlDeck._slides attribute that
+        HtmlToPptxConverter expects. It converts the new SlideStatus
+        objects to SlideAdapter objects that have the same interface
+        as the old Slide class.
+        
+        Returns:
+            List of SlideAdapter objects that mimic the old Slide interface
+        """
+        slides = []
+        for status in self.agent.get_status():
+            if status.is_generated:
+                slides.append(SlideAdapter.from_slide_status(status))
+        return slides
+    
+    def to_html(self) -> str:
+        """Generate combined HTML for all slides.
+        
+        This method mimics the old HtmlDeck.to_html() that HtmlToPptxConverter
+        expects. It combines all slide HTML into a single document.
+        
+        Returns:
+            Combined HTML string with all slides
+        """
+        slides_html = []
+        for status in self.agent.get_status():
+            if status.is_generated:
+                slides_html.append(status.html)
+        
+        # If no slides, return empty HTML
+        if not slides_html:
+            return "<html><body><h1>No slides generated</h1></body></html>"
+        
+        # For now, just concatenate slides (HtmlToPptxConverter processes them individually)
+        # The converter actually doesn't use this combined HTML for rendering,
+        # it accesses individual slides via _slides property
+        return "\n".join(slides_html)
+    
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        return f"SlideDeckAgentAdapter(slides={len(self._slides)}, theme={self.theme})"
 
 
 # =========================

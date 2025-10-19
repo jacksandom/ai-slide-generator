@@ -15,7 +15,7 @@ import base64
 import io
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, TYPE_CHECKING
 from dataclasses import dataclass
 
 try:
@@ -34,7 +34,13 @@ try:
 except ImportError:
     PYTHON_PPTX_AVAILABLE = False
 
-from .html_slides import HtmlDeck, Slide
+# Import SlideAdapter from new architecture (works as Slide replacement)
+from .html_slides_agent import SlideAdapter as Slide
+
+# Only import HtmlDeck for type checking to avoid import errors
+if TYPE_CHECKING:
+    from .html_slides import HtmlDeck
+
 from .visual_capture_engine import (
     VisualizationCaptureEngine, VisualizationArea, CaptureMetrics, 
     DebugMode, SpatialCollisionDetector

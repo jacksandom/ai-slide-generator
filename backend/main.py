@@ -1,14 +1,12 @@
 """FastAPI backend for the slide generator application."""
 
-import html
-import json
-import base64
+import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-import re
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from datetime import datetime
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import uvicorn
 import time
@@ -18,38 +16,31 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from slide_generator.tools import html_slides_agent
-# Make UC tools optional to allow backend to start without unitycatalog/databricks-connect
-try:
-    from slide_generator.tools import uc_tools  # type: ignore
-    TOOL_DICT = uc_tools.UC_tools
-except Exception:
-    print("Warning: UC tools not available; starting without UC_tools.")
-    TOOL_DICT = {}
-# from slide_generator.core import chatbot  # No longer needed with new agent
-from slide_generator.config import config
-from databricks.sdk import WorkspaceClient
+from slide_generator.config import config, get_output_path
 
-# Initialize Databricks client and components
-# Use explicit profile so local dev can auth with the intended workspace
-ws = WorkspaceClient(profile='e2-demo', product='slide-generator')
-
-def get_logo_base64():
-    """Load the EY-Parthenon logo and encode it as base64 for embedding in HTML."""
-    logo_path = Path(__file__).parent.parent / "src" / "slide_generator" / "assets" / "EY-Parthenon_Logo_2021.svg"
-    try:
-        with open(logo_path, 'rb') as logo_file:
-            logo_data = logo_file.read()
-            return base64.b64encode(logo_data).decode('utf-8')
-    except FileNotFoundError:
-        print(f"Warning: Logo file not found at {logo_path}")
-        return ""
-
-# Initialize chatbot and conversation state with neutral branding (no EY watermark)
+# Initialize slide agent with neutral branding
 ey_theme = html_slides_agent.SlideTheme(
     bottom_right_logo_url=None,
     footer_text=None
 )
 slide_agent = html_slides_agent.SlideDeckAgent(theme=ey_theme)
+
+# Initialize V3 PowerPoint converter
+try:
+    from slide_generator.tools.html_to_pptx_v3 import HtmlToPptxConverterV3
+    from databricks.sdk import WorkspaceClient
+    
+    # Initialize with Databricks client
+    db_client = WorkspaceClient(profile="logfood", product='slide-generator')
+    pptx_converter_v3 = HtmlToPptxConverterV3(
+        workspace_client=db_client,
+        model_endpoint="databricks-claude-sonnet-4-5"
+    )
+    print("✅ V3 PowerPoint converter initialized")
+except Exception as e:
+    print(f"⚠️  V3 converter initialization failed: {e}")
+    print("   PowerPoint export will not be available")
+    pptx_converter_v3 = None
 
 # Initialize FastAPI app
 app = FastAPI(title="Slide Generator API", version="1.0.0")
@@ -64,20 +55,18 @@ app.add_middleware(
 )
 
 # Global conversation state (in production, use proper session management)
-conversations: Dict[str, Dict] = {}
+conversations: Dict[str, List] = {}
 
-# --- Demo static mode -------------------------------------------------------
-# When enabled, any user prompt will render a predefined set of static slides
-# without calling the LLM or tools. Useful for controlled demos.
-# NOTE: This is currently enabled and uses the new LLM flow (_run_llm_flow)
-DEMO_STATIC_MODE: bool = True
+def get_or_create_conversation(session_id: str) -> List:
+    """Get or create conversation for session"""
+    if session_id not in conversations:
+        conversations[session_id] = []
+    return conversations[session_id]
 
 def _append_api_message(session_id: str, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+    """Append a message to the conversation history"""
     conv = get_or_create_conversation(session_id)
-    conv["api_conversation"].append(ChatMessage(role=role, content=content, metadata=metadata))
-
-
-
+    conv.append(ChatMessage(role=role, content=content, metadata=metadata))
 
 
 def _run_llm_flow(session_id: str, user_prompt: str) -> None:
@@ -157,7 +146,7 @@ def _run_llm_flow(session_id: str, user_prompt: str) -> None:
         
         # Step 5: Show final status
         status_list = result.get("status", [])
-        status_text = "\n".join([f"Slide {s.id}: {s.title}" for s in status_list])
+        status_text = "\n".join([f"Slide {s.position}: {s.title}" for s in status_list])
         print(f"[DEBUG] LLM Flow - Status: {status_text}")
         
         if is_follow_on:
@@ -187,252 +176,7 @@ def _run_llm_flow(session_id: str, user_prompt: str) -> None:
             metadata={"title": "Error"}
         )
 
-def _run_prism_flow(session_id: str) -> None:
-    try:
-        global slide_agent
-        slide_agent = html_slides_agent.SlideDeckAgent(theme=ey_theme)
 
-        PRISM_SLIDES: List[str] = [
-            """<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"/><meta content=\"width=device-width, initial-scale=1.0\" name=\"viewport\"/><title>Project Prism - The Opportunity</title><link href=\"https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css\" rel=\"stylesheet\"/><link href=\"https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css\" rel=\"stylesheet\"/><link href=\"https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap\" rel=\"stylesheet\"/><style>body{font-family:'Roboto',sans-serif;background-color:white;color:#1A365D;margin:0;padding:0}.slide-container{width:1280px;min-height:720px;overflow:hidden;position:relative}.header{padding:0 60px 8px}.header h1{margin:0}.content{padding:0 60px}.opportunity-icon{color:#FF5722;font-size:48px;margin-bottom:20px}.cost-icon{color:#FF5722;font-size:48px;margin-bottom:20px}.separator{width:2px;background-color:#E2E8F0;height:400px}.accent-text{color:#FF5722;font-weight:500}</style></head><body><div class=\"slide-container\"><div class=\"header\"><h1 class=\"text-3xl font-bold\">The Opportunity: AI Slide Generation for Consulting</h1></div><div class=\"content\"><div class=\"flex justify-between items-start\"><div class=\"w-1/2 pr-10\"><div class=\"opportunity-icon\"><i class=\"fas fa-lightbulb\"></i></div><h2 class=\"text-xl font-semibold mb-4\">Transforming Slide Creation for Consulting</h2><p class=\"mb-4\">Imagine if consulting firms could <span class=\"accent-text\">instantly create tailored, secure slides</span> from proprietary know-how &amp; sensitive client data—<span class=\"accent-text\">automagically</span>.</p><ul class=\"list-disc pl-5 space-y-2\"><li>Leverage existing firm knowledge bases and client data</li><li>Maintain security and compliance across all materials</li><li>Generate high-quality slides that align with firm branding</li></ul><p class=\"mt-4\">Unlocking immediate value for industry leaders:</p><div class=\"flex space-x-4 mt-2\"><span class=\"font-semibold\">EY</span><span class=\"font-semibold\">KPMG</span><span class=\"font-semibold\">BCG</span><span class=\"font-semibold\">+ more</span></div></div><div class=\"separator mx-8\"></div><div class=\"w-1/2 pl-10\"><div class=\"cost-icon\"><i class=\"fas fa-chart-line\"></i></div><h2 class=\"text-xl font-semibold mb-4\">The Cost of Manual Slide Creation</h2><div class=\"mb-4\"><span class=\"text-4xl font-bold accent-text\">4 hours</span><span class=\"text-xl ml-2\">spent daily on slide creation</span></div><div class=\"bg-gray-50 p-4 rounded-lg mb-4\"><p class=\"font-semibold mb-2\">Impact per consultant:</p><table class=\"w-full\"><tr><td>Daily hours on slides:</td><td class=\"text-right\">4 hours</td></tr><tr><td>Average billing rate:</td><td class=\"text-right\">$300/hour</td></tr><tr class=\"border-t border-gray-300\"><td class=\"font-semibold\">Daily cost:</td><td class=\"text-right font-semibold\">$1,200</td></tr><tr><td class=\"font-semibold\">Annual cost (250 days):</td><td class=\"text-right font-semibold\">$300,000</td></tr></table></div><p class=\"mt-4\"><span class=\"accent-text font-semibold\">Project Prism</span> converts wasted hours into billable client value—increasing impact and profitability.</p></div></div></div></div></body></html>""",
-            """<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"/><meta content=\"width=device-width, initial-scale=1.0\" name=\"viewport\"/><title>Project Prism Architecture</title><link href=\"https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css\" rel=\"stylesheet\"/><link href=\"https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css\" rel=\"stylesheet\"/><link href=\"https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap\" rel=\"stylesheet\"/><style>body{font-family:'Roboto',sans-serif;background-color:white;color:#1A365D;margin:0;padding:0}.slide-container{width:1280px;min-height:720px;overflow:hidden;position:relative}.header{padding:0 60px 8px}.header h1{margin:0}.content{padding:0 60px}#prism-s2 .content{transform:scale(0.59);transform-origin:top center}.arch-box{border:2px solid #FF5722;border-radius:8px;background-color:#FFF5F2;padding:15px;position:relative}.arch-box-inner{border:1px solid #FF5722;border-radius:4px;background-color:white;padding:10px;margin:5px 0;display:flex;align-items:center;justify-content:center}.arrow{color:#FF5722;position:absolute;font-size:20px}.arrow-right:before{content:\"\\f061\";font-family:\"Font Awesome 5 Free\";font-weight:900}.arrow-down:before{content:\"\\f063\";font-family:\"Font Awesome 5 Free\";font-weight:900}.arrow-up:before{content:\"\\f062\";font-family:\"Font Awesome 5 Free\";font-weight:900}.icon-box{color:#FF5722;font-size:24px;margin-bottom:10px}</style></head><body><div class=\"slide-container\" id=\"prism-s2\"><div class=\"header\"><h1 class=\"text-3xl font-bold\">Project Prism Architecture</h1></div><div class=\"content\"><div class=\"flex flex-col items-center\"><div class=\"arch-box w-64 mb-8\"><div class=\"icon-box text-center\"><i class=\"fas fa-users\"></i></div><div class=\"text-center font-semibold mb-2\">Users</div><div class=\"text-sm text-center\">Natural language prompts for slide generation</div></div><div class=\"h-10 flex justify-center items-center\"><i class=\"fas fa-arrow-down text-orange-500\"></i></div><div class=\"arch-box w-3/4 mb-8\"><div class=\"icon-box text-center\"><i class=\"fas fa-desktop\"></i></div><div class=\"text-center font-semibold mb-2\">Project Prism App Interface</div><div class=\"flex justify-around\"><div class=\"arch-box-inner text-center w-1/4\"><div class=\"text-sm font-medium\">Interactive Editor</div></div><div class=\"arch-box-inner text-center w-1/4\"><div class=\"text-sm font-medium\">Review Pane</div></div><div class=\"arch-box-inner text-center w-1/4\"><div class=\"text-sm font-medium\">Export</div></div></div></div><div class=\"h-10 flex justify-center items-center\"><i class=\"fas fa-arrow-down text-orange-500\"></i></div><div class=\"arch-box w-3/4 mb-8\"><div class=\"icon-box text-center\"><i class=\"fas fa-brain\"></i></div><div class=\"text-center font-semibold\">LLM Content Creator</div><div class=\"text-sm text-center\">Intelligent content generation and orchestration</div></div><div class=\"h-10 flex justify-center items-center\"><i class=\"fas fa-arrow-down text-orange-500\"></i></div><div class=\"flex w-full justify-between mb-8\"><div class=\"arch-box w-5/12\"><div class=\"icon-box text-center\"><i class=\"fas fa-tools\"></i></div><div class=\"text-center font-semibold mb-2\">Agents / Tools</div><div class=\"grid grid-cols-2 gap-2\"><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">RAG</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">SQL</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">Data Viz</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">Iconographer</div></div><div class=\"arch-box-inner text-center col-span-2\"><div class=\"text-sm font-medium\">Web Search</div></div></div></div><div class=\"arch-box w-5/12\"><div class=\"icon-box text-center\"><i class=\"fas fa-file-powerpoint\"></i></div><div class=\"text-center font-semibold mb-2\">Slide Creation Framework</div><div class=\"flex flex-col space-y-2\"><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">CSS Theme</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">HTML Deck Manager</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">Export Manager</div></div><div class=\"flex items-center\"><div class=\"flex-grow h-0.5 bg-gray-300\"></div><div class=\"px-2 text-gray-500 text-xs\">connects to</div><div class=\"flex-grow h-0.5 bg-gray-300\"></div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">Lakebase State Machine</div></div></div></div></div></div></body></html>""",
-            """<!DOCTYPE html>
-
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>Key Benefits for Consulting Firms</title>
-<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet"/>
-<link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap" rel="stylesheet"/>
-<style>
-        body {
-            font-family: 'Roboto', sans-serif;
-            background-color: white;
-            color: #1A365D;
-            margin: 0;
-            padding: 0;
-        }
-        .slide-container {
-            width: 1280px;
-            min-height: 720px;
-            overflow: hidden;
-            position: relative;
-        }
-        .header {
-            padding: 0 60px 8px;
-        }
-        .header h1 { margin: 0; }
-        .content {
-            padding: 0 60px;
-        }
-        .icon-circle {
-            width: 64px;
-            height: 64px;
-            border-radius: 32px;
-            background-color: #FFF5F2;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 15px;
-        }
-        .benefit-icon {
-            color: #FF5722;
-            font-size: 28px;
-        }
-        .benefit-box {
-            border: 1px solid #E2E8F0;
-            border-radius: 8px;
-            padding: 25px;
-            background-color: #F8FAFC;
-            height: 100%;
-        }
-        
-    </style>
-</head>
-<body>
-<div class="slide-container">
-<div class="header">
-<h1 class="text-3xl font-bold">Key Benefits for Analysts &amp; Consulting Firms</h1>
- </div>
-<div class="content">
-<div class="grid grid-cols-3 gap-8">
-<!-- Benefit 1 -->
-<div class="benefit-box flex flex-col items-center text-center">
-<div class="icon-circle">
-<i class="benefit-icon fas fa-clock"></i>
-</div>
-<h3 class="text-xl font-semibold mb-2">Cut Deck Creation Time</h3>
-<p class="text-gray-700">Reduce slide creation time by 75% through AI-powered automation</p>
-</div>
-<!-- Benefit 2 -->
-<div class="benefit-box flex flex-col items-center text-center">
-<div class="icon-circle">
-<i class="benefit-icon fas fa-shield-alt"></i>
-</div>
-<h3 class="text-xl font-semibold mb-2">Enterprise-Grade Security</h3>
-<p class="text-gray-700">Secure access to client data via Databricks Unity Catalog</p>
-</div>
-<!-- Benefit 3 -->
-<div class="benefit-box flex flex-col items-center text-center">
-<div class="icon-circle">
-<i class="benefit-icon fas fa-brain"></i>
-</div>
-<h3 class="text-xl font-semibold mb-2">AI Model Flexibility</h3>
-<p class="text-gray-700">Choose AI models based on specific use cases and requirements</p>
-</div>
-<!-- Benefit 4 -->
-<div class="benefit-box flex flex-col items-center text-center">
-<div class="icon-circle">
-<i class="benefit-icon fas fa-database"></i>
-</div>
-<h3 class="text-xl font-semibold mb-2">Automated Data Warehousing</h3>
-<p class="text-gray-700">Convert natural language to SQL for seamless data analysis</p>
-</div>
-<!-- Benefit 5 -->
-<div class="benefit-box flex flex-col items-center text-center">
-<div class="icon-circle">
-<i class="benefit-icon fas fa-check-circle"></i>
-</div>
-<h3 class="text-xl font-semibold mb-2">Consistent Quality</h3>
-<p class="text-gray-700">Align perfectly with firm-native templates and branding</p>
-</div>
-<!-- Benefit 6 -->
-<div class="benefit-box flex flex-col items-center text-center">
-<div class="icon-circle">
-<i class="benefit-icon fas fa-handshake"></i>
-</div>
-<h3 class="text-xl font-semibold mb-2">Client Trust</h3>
-<p class="text-gray-700">Deliver high-quality materials that strengthen relationships</p>
-</div>
-</div>
-</div>
-        
-</div>
-</body>
-</html>""",
-            """<html><body style='font-family:Arial'><div style='width:1280px;height:720px;display:flex;align-items:center;justify-content:center'><h1>Slide 4 (placeholder)</h1></div></body></html>""",
-            """<!DOCTYPE html>
-
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>What Sets Project Prism Apart</title>
-<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet"/>
-<link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap" rel="stylesheet"/>
-<style>
-        body { font-family: 'Roboto', sans-serif; background-color: white; color: #1A365D; margin: 0; padding: 0; }
-        .slide-container { width: 1280px; min-height: 720px; overflow: hidden; position: relative; }
-        .header { padding: 0 60px 8px; }
-        .header h1{ margin: 0; }
-        .content { padding: 0 60px; }
-        .icon-shield { width: 80px; height: 80px; border-radius: 40px; background-color: #FFF5F2; display: flex; align-items: center; justify-content: center; margin-bottom: 20px; }
-        .advantage-icon { color: #FF5722; font-size: 32px; }
-        .advantage-card { border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; background-color: #F8FAFC; height: 100%; transition: transform 0.2s; }
-        .advantage-card:hover { transform: translateY(-5px); }
-        .accent-text { color: #FF5722; font-weight: 500; }
-    </style>
-</head>
-<body>
-<div class=\"slide-container\">
-<div class=\"header\">
-<h1 class=\"text-3xl font-bold\">What Sets Project Prism Apart</h1>
-</div>
-<div class=\"content\">
-<div class=\"flex items-center mb-10\">
-<div class=\"icon-shield mr-6\">
-<i class=\"advantage-icon fas fa-shield-alt\"></i>
-</div>
-<div>
-<h2 class=\"text-2xl font-semibold mb-2\">Deep Integration with <span class=\"accent-text\">Databricks Unity Catalog</span></h2>
-<p class=\"text-lg\">The foundation of our enterprise security and governance capabilities</p>
-</div>
-</div>
-<div class=\"grid grid-cols-2 gap-8\">
-<div class=\"advantage-card\">
-<div class=\"flex items-center mb-4\"><div class=\"text-orange-500 mr-3 text-2xl\"><i class=\"fas fa-lock\"></i></div><h3 class=\"text-xl font-semibold\">Enterprise-Grade Security</h3></div>
-<ul class=\"space-y-2 ml-8\">
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>End-to-end encryption of sensitive client data</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Role-based access controls for consultants</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Fully auditable data access and slide generation</span></li>
-</ul>
-</div>
-<div class=\"advantage-card\">
-<div class=\"flex items-center mb-4\"><div class=\"text-orange-500 mr-3 text-2xl\"><i class=\"fas fa-balance-scale\"></i></div><h3 class=\"text-xl font-semibold\">Complete Governance Framework</h3></div>
-<ul class=\"space-y-2 ml-8\">
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Chain of trust for all generated content</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Compliance with industry regulations</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Automated documentation of data lineage</span></li>
-</ul>
-</div>
-<div class=\"advantage-card\">
-<div class=\"flex items-center mb-4\"><div class=\"text-orange-500 mr-3 text-2xl\"><i class=\"fas fa-brain\"></i></div><h3 class=\"text-xl font-semibold\">Flexible AI Orchestration</h3></div>
-<ul class=\"space-y-2 ml-8\">
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Choice of proprietary or open source models</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Custom model training on firm knowledge bases</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Advanced reasoning for complex slides</span></li>
-</ul>
-</div>
-<div class=\"advantage-card\">
-<div class=\"flex items-center mb-4\"><div class=\"text-orange-500 mr-3 text-2xl\"><i class=\"fas fa-network-wired\"></i></div><h3 class=\"text-xl font-semibold\">Built for Enterprise Integration</h3></div>
-<ul class=\"space-y-2 ml-8\">
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Seamless connectivity with existing systems</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Designed for regulated environments</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Scales with organizational needs</span></li>
-</ul>
-</div>
-</div>
-</div>
-</div>
-</body>
-</html>""",
-        ]
-
-        TITLES = ["The Opportunity", "Architecture", "Key Benefits", "Placeholder", "What Sets Prism Apart"]
-
-        # Share high-level plan
-        plan_lines = [f"{idx+1}) {title}" for idx, title in enumerate(TITLES)]
-        _append_api_message(
-            session_id,
-            role="assistant",
-            content=(
-                "Plan: I'll generate a concise 5-slide deck in this order:\n\n"
-                + "\n".join(plan_lines)
-            ),
-            metadata={"title": "Plan"}
-        )
-
-        for i in range(5):
-            title = TITLES[i]
-            # Announce what we're doing
-            _append_api_message(session_id, role="assistant", content=f"Planning slide {i+1}: {title}…")
-            # Realistic single tool usage message for refresh hook
-            _append_api_message(session_id, role="assistant", content="Using HTML Deck Manager to render slide…", metadata={"title": "🔧 Using a tool"})
-            time.sleep(0.9)
-            # Add slide to agent's artifacts directly
-            slide_id = i + 1
-            slide_agent.initial_state["artifacts"][slide_id] = PRISM_SLIDES[i]
-            # Also add to todos if not already present
-            if not any(todo.id == slide_id for todo in slide_agent.initial_state["todos"]):
-                from slide_generator.tools.html_slides_agent import SlideTodo
-                slide_agent.initial_state["todos"].append(
-                    SlideTodo(id=slide_id, action="WRITE_SLIDE", title=title, details="", depends_on=[])
-                )
-            # Provide hint for next slide BEFORE the tool result so tool result is last
-            if i < 4:
-                _append_api_message(session_id, role="assistant", content=f"Next: Slide {i+2} – {TITLES[i+1]}")
-                time.sleep(0.1)
-            # Trigger frontend refresh (ChatInterface listens for 'tool result')
-            _append_api_message(session_id, role="assistant", content=f"✅ Slide {i+1} ready: {title}", metadata={"title": "🔧 Tool result"})
-
-        outline = "\n".join([f"{i+1}) {TITLES[i]}" for i in range(5)])
-        _append_api_message(session_id, role="assistant", content=f"All set. Here's your deck outline:\n\n{outline}")
-        # Signal completion explicitly so the frontend can stop polling
-        _append_api_message(session_id, role="assistant", content="Generation complete.", metadata={"title": "Done"})
-    except Exception as e:
-        _append_api_message(session_id, role="assistant", content=f"Demo flow error: {e}")
 # Pydantic models for API requests/responses
 class ChatMessage(BaseModel):
     role: str
@@ -449,56 +193,6 @@ class ChatResponse(BaseModel):
 
 class SlidesResponse(BaseModel):
     slides: List[str]
-
-def openai_to_api_message(openai_msg: Dict) -> List[ChatMessage]:
-    """Convert OpenAI format message to API ChatMessage format"""
-    if openai_msg["role"] == "system":
-        return []  # Don't display system messages
-    
-    elif openai_msg["role"] == "user":
-        return [ChatMessage(role="user", content=openai_msg["content"])]
-    
-    elif openai_msg["role"] == "assistant":
-        messages = []
-        if "tool_calls" in openai_msg and openai_msg["content"]:
-            # Assistant with tool calls
-            messages.append(ChatMessage(role="assistant", content=openai_msg["content"]))
-            tool_content = f"Calling tool {openai_msg['tool_calls'][0]['function']['name']} with arguments {openai_msg['tool_calls'][0]['function']['arguments']}"
-            messages.append(ChatMessage(
-                role="assistant",
-                content=tool_content,
-                metadata={"title": "🔧 Using a tool"}
-            ))
-        else:
-            # Regular assistant message
-            messages.append(ChatMessage(role="assistant", content=openai_msg["content"]))
-        return messages
-    
-    elif openai_msg["role"] == "tool":
-        # Tool result - display as assistant message with special formatting
-        return [ChatMessage(
-            role="assistant", 
-            content=f"✅ {openai_msg['content']}",
-            metadata={"title": "🔧 Tool result"}
-        )]
-    
-    return []
-
-def get_or_create_conversation(session_id: str) -> Dict:
-    """Get or create conversation for session"""
-    if session_id not in conversations:
-        conversations[session_id] = {
-            "openai_conversation": [{"role": "system", "content": config.system_prompt}],
-            "api_conversation": []
-        }
-    return conversations[session_id]
-
-def update_conversations_with_openai_message(session_id: str, openai_msg: Dict):
-    """Add OpenAI message to both conversation lists"""
-    conv = get_or_create_conversation(session_id)
-    conv["openai_conversation"].append(openai_msg)
-    api_messages = openai_to_api_message(openai_msg)
-    conv["api_conversation"].extend(api_messages)
 
 @app.get("/")
 async def root():
@@ -519,24 +213,12 @@ async def chat(request: ChatRequest):
         
         if not user_input:
             conv = get_or_create_conversation(session_id)
-            return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
+            return ChatResponse(messages=conv, session_id=session_id)
         
-        # Demo static mode: bypass LLM and tools, render predefined slides
-        if DEMO_STATIC_MODE:
-            # Minimal transcript: add user only, then process synchronously
-            update_conversations_with_openai_message(session_id, {"role": "user", "content": user_input})
-            # Process the LLM flow synchronously to block until completion
-            _run_llm_flow(session_id, user_input)
-            conv = get_or_create_conversation(session_id)
-            return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
-
-        # Normal mode: Add user message and process synchronously
-        user_msg_openai = {"role": "user", "content": user_input}
-        update_conversations_with_openai_message(session_id, user_msg_openai)
-        # Process the conversation synchronously to block until completion
+        # Process the LLM flow
         _run_llm_flow(session_id, user_input)
         conv = get_or_create_conversation(session_id)
-        return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
+        return ChatResponse(messages=conv, session_id=session_id)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing chat: {str(e)}")
@@ -547,9 +229,9 @@ async def get_chat_status(session_id: str):
     """Get current conversation status and messages"""
     conv = get_or_create_conversation(session_id)
     return {
-        "messages": conv["api_conversation"],
+        "messages": conv,
         "session_id": session_id,
-        "message_count": len(conv["api_conversation"])
+        "message_count": len(conv)
     }
 
 @app.get("/slides/html", response_model=SlidesResponse)
@@ -567,15 +249,6 @@ async def get_slides_html():
     except Exception as e:
         print(f"[DEBUG] get_slides_html - Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error getting slides: {str(e)}")
-
-@app.post("/slides/refresh")
-async def refresh_slides():
-    """Refresh slides display"""
-    try:
-        slides_list = slide_agent.get_slides()
-        return {"slides": slides_list}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error refreshing slides: {str(e)}")
 
 @app.post("/slides/reset")
 async def reset_slides():
@@ -614,46 +287,6 @@ async def clear_slides():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error clearing slides: {str(e)}")
 
-@app.post("/slides/generate")
-async def generate_slides(request: Dict[str, Any]):
-    """Generate slides using the new LLM-based approach"""
-    try:
-        topic = request.get("topic", "AI and Machine Learning")
-        style_hint = request.get("style_hint", "Professional, clean, modern")
-        n_slides = request.get("n_slides", 3)
-        
-        # Use the new LLM-based generation
-        result = slide_agent.process_message(
-            f"Create a {n_slides}-slide presentation about '{topic}' with a '{style_hint}' style"
-        )
-        
-        return {
-            "message": "Slides generated successfully",
-            "result": result,
-            "slides": slide_agent.get_slides()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating slides: {str(e)}")
-
-@app.post("/slides/modify")
-async def modify_slide(request: Dict[str, Any]):
-    """Modify a specific slide using the new LLM-based approach"""
-    try:
-        slide_id = request.get("slide_id", 1)
-        changes = request.get("changes", [])
-        
-        # Convert changes to a natural language request
-        change_description = f"Modify slide {slide_id}: " + "; ".join(changes)
-        result = slide_agent.process_message(change_description)
-        
-        return {
-            "message": "Slide modified successfully",
-            "result": result,
-            "slides": slide_agent.get_slides()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error modifying slide: {str(e)}")
-
 @app.get("/slides/status")
 async def get_slides_status():
     """Get current slides status"""
@@ -668,62 +301,148 @@ async def get_slides_status():
 
 @app.post("/slides/export")
 async def export_slides():
-    """Export slides to file"""
+    """Export slides to individual HTML files in a timestamped directory"""
     try:
-        output_path = config.get_output_path("exported_slides.html")
-        saved_files = slide_agent.save_slides(str(output_path.parent))
-        return {"message": f"Slides exported successfully to {len(saved_files)} files", "path": str(output_path)}
+        # Validate slides exist
+        slides = slide_agent.get_slides()
+        if not slides:
+            raise HTTPException(
+                status_code=400,
+                detail="No slides to export. Please generate slides first."
+            )
+        
+        # Create timestamped output directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = get_output_path(f"slides_export_{timestamp}")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save slides
+        saved_files = slide_agent.save_slides(str(output_dir))
+        
+        # Get slide information for response
+        status = slide_agent.get_status()
+        slide_info = [
+            {
+                "file": Path(f).name,
+                "title": s.title,
+                "position": s.position
+            }
+            for f, s in zip(saved_files, status) if s.is_generated
+        ]
+        
+        return {
+            "success": True,
+            "message": f"Successfully exported {len(saved_files)} slides",
+            "output_dir": str(output_dir),
+            "slides": slide_info
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error exporting slides: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error exporting slides: {str(e)}"
+        )
 
 @app.get("/slides/export/pptx")
-async def export_slides_pptx() -> FileResponse:
-    """Export the current deck to a PPTX file and stream it back.
-
-    Uses the HtmlToPptxConverter from tools/html_to_pptx.py (pulled from export-visuals branch).
+async def export_slides_pptx(use_screenshot: bool = True) -> FileResponse:
+    """Export the current deck to PowerPoint format using V3 converter.
+    
+    Uses the V3 maximum LLM flexibility approach with proven 100% success rate.
+    
+    Args:
+        use_screenshot: Whether to use screenshot mode (default: True)
+            - True: Pixel-perfect charts as images (for presentations)
+            - False: Editable PowerPoint charts (for analysis)
+    
+    Requirements:
+        - playwright: pip install playwright && playwright install
+        - python-pptx: pip install python-pptx
+        - databricks-sdk: pip install databricks-sdk
+    
+    Returns:
+        FileResponse: PowerPoint file for download
     """
     try:
-        from slide_generator.tools.html_to_pptx import HtmlToPptxConverter
-        from slide_generator.config import get_output_path
-
-        # Compose output path (timestamped)
-        from datetime import datetime
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = get_output_path(f"slides_{ts}.pptx")
-
-        # Ensure directory exists
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Convert - we need to create a temporary HtmlDeck-like object for the converter
-        # Since the converter expects the old interface, we'll create a simple adapter
-        class AgentAdapter:
-            def __init__(self, agent):
-                self.agent = agent
-            
-            def tool_get_html(self):
-                return self.agent.get_slides()
+        # Validate slides exist
+        slides = slide_agent.get_slides()
+        if not slides:
+            raise HTTPException(
+                status_code=400,
+                detail="No slides to export. Please generate slides first."
+            )
         
-        adapter = AgentAdapter(slide_agent)
-        converter = HtmlToPptxConverter(adapter)
-        await converter.convert_to_pptx(str(output_path), include_charts=True)
-
-        # Stream file
+        print(f"[V3 PPTX Export] Starting export of {len(slides)} slides")
+        print(f"[V3 PPTX Export] Screenshot mode: {use_screenshot}")
+        
+        # Check if V3 converter is available
+        if pptx_converter_v3 is None:
+            raise HTTPException(
+                status_code=501,
+                detail="V3 PowerPoint converter not initialized. Check server logs for details."
+            )
+        
+        # Generate timestamped output path
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = get_output_path(f"slides_v3_{timestamp}.pptx")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        print(f"[V3 PPTX Export] Output path: {output_path}")
+        
+        # Save HTML files for screenshot capture and validation
+        html_output_dir = output_path.parent / f"html_v3_{timestamp}"
+        html_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        saved_html_files = []
+        for i, status in enumerate(slide_agent.get_status(), 1):
+            if status.is_generated:
+                # Create sanitized filename
+                safe_title = status.title.replace(' ', '_').replace('/', '_')[:30]
+                html_file = html_output_dir / f"slide_{i}_{safe_title}.html"
+                html_file.write_text(status.html, encoding='utf-8')
+                saved_html_files.append(str(html_file))
+                print(f"[V3 PPTX Export] Saved HTML {i}: {html_file.name}")
+        
+        print(f"[V3 PPTX Export] Saved {len(saved_html_files)} HTML files")
+        
+        # Convert using V3
+        result_path = await pptx_converter_v3.convert_slide_deck(
+            slides=slides,
+            output_path=str(output_path),
+            use_screenshot=use_screenshot,
+            html_source_paths=saved_html_files
+        )
+        
+        print(f"[V3 PPTX Export] ✅ Conversion complete: {result_path}")
+        print(f"[V3 PPTX Export] HTML files available at: {html_output_dir}")
+        
+        # Verify file was created
+        if not os.path.exists(output_path):
+            raise Exception("PowerPoint file was not created")
+        
+        file_size = os.path.getsize(output_path) / 1024
+        print(f"[V3 PPTX Export] File size: {file_size:.1f}KB")
+        
+        # Return file for download
         return FileResponse(
             path=str(output_path),
             media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             filename=output_path.name,
         )
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error exporting PPTX: {str(e)}")
-
-@app.get("/conversation/{session_id}")
-async def get_conversation(session_id: str):
-    """Get conversation history for debugging"""
-    conv = get_or_create_conversation(session_id)
-    return {
-        "openai_conversation": conv["openai_conversation"],
-        "api_conversation": conv["api_conversation"]
-    }
+        print(f"[V3 PPTX Export] ❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error exporting to PowerPoint: {str(e)}"
+        )
 
 if __name__ == "__main__":
     print("🚀 Starting Slide Generator FastAPI Backend")

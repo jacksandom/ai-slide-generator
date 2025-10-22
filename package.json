@@ -1,0 +1,29 @@
+{
+  "name": "slide-generator-fullstack",
+  "version": "1.0.0",
+  "description": "Full-stack slide generator with React frontend and FastAPI backend",
+  "scripts": {
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "backend": "cd backend && python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000",
+    "frontend": "cd frontend/slide-generator-frontend && npm start",
+    "install-all": "cd backend && pip install -r requirements.txt && cd ../frontend/slide-generator-frontend && npm install",
+    "build": "cd frontend/slide-generator-frontend && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/slide-generator.git"
+  },
+  "keywords": [
+    "slides",
+    "presentation",
+    "ai",
+    "react",
+    "fastapi",
+    "databricks"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}

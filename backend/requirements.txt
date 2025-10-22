@@ -1,0 +1,20 @@
+# FastAPI Backend Requirements
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+websockets>=11.0
+
+# Core dependencies inherited from parent project
+gradio>=4.0.0
+databricks-sdk>=0.20.0
+pathlib
+typing-extensions
+
+# LangChain dependencies for chatbot
+langchain-core>=0.1.0
+langchain-databricks>=0.1.0
+langchain>=0.1.0
+pydantic>=2.0.0
+
+# Additional dependencies for data handling
+pandas>=2.0.0

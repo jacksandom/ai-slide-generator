@@ -150,8 +150,18 @@ class Chatbot:
             return "Title slide added/replaced at position 0"
         
         elif function_name == "tool_add_agenda_slide":
+            before = len(self.html_deck._slides)
             self.html_deck.add_agenda_slide(agenda_points=function_args["agenda_points"])
-            return "Agenda slide added/replaced at position 1"
+            after = len(self.html_deck._slides)
+            if after > before:
+                return f"Agenda slide inserted at position 1 (second slide). Deck now has {after} slides."
+            else:
+                # Find current agenda position
+                try:
+                    idx = next(i for i, s in enumerate(self.html_deck._slides) if getattr(s, 'slide_type', '') == 'agenda')
+                except StopIteration:
+                    idx = 1
+                return f"Agenda slide updated at position {idx}. Deck has {after} slides."
         
         elif function_name == "tool_add_content_slide":
             self.html_deck.add_content_slide(

@@ -93,7 +93,7 @@ ALLOWED_INLINE_SCRIPT_KEYWORDS = (
 )
 
 # LLM Configuration
-ws = WorkspaceClient(profile='e2-demo', product='slide-generator')
+ws = WorkspaceClient(profile='logfood', product='slide-generator')
 model_serving_client = ws.serving_endpoints.get_open_ai_client()
 
 NLU_ENDPOINT = "databricks-gpt-oss-120b"

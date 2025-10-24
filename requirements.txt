@@ -1,5 +1,5 @@
 # Core dependencies for the slide generator
-gradio>=4.0.0
+# gradio>=4.0.0  # REMOVED: Gradio frontend deprecated in favor of React
 databricks-sdk>=0.20.0
 pathlib
 typing-extensions

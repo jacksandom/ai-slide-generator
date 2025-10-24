@@ -4,7 +4,7 @@ from unitycatalog.ai.core.databricks import DatabricksFunctionClient
 import pandas as pd
 ws = WorkspaceClient(product='slide-generator', profile='e2-demo')
 
-space_id = "01f0837bc42a1b0281e4376d4e3d6143"
+space_id = "01effebcc2781b6bbb749077a55d31e3"
 example_query = "give me ey spend by day for last 6 months"
 
 def query_genie_space(question: str, space_id: str = space_id, workspace_client: WorkspaceClient = ws) -> str:

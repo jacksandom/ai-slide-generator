@@ -25,7 +25,7 @@ classifiers = [
 ]
 requires-python = ">=3.9"
 dependencies = [
-    "gradio>=4.0.0",
+    # "gradio>=4.0.0",  # REMOVED: Gradio frontend deprecated in favor of React
     "databricks-sdk>=0.20.0",
     "pathlib",
     "typing-extensions",
@@ -115,7 +115,7 @@ strict_equality = true
 
 [[tool.mypy.overrides]]
 module = [
-    "gradio.*",
+    # "gradio.*",  # REMOVED: Gradio frontend deprecated
     "databricks.*",
     "langchain.*",
 ]

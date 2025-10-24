@@ -25,7 +25,7 @@ LLM_ENDPOINT = os.getenv("LLM_ENDPOINT", DEFAULT_LLM_ENDPOINT)
 DATABRICKS_HOST = os.getenv("DATABRICKS_HOST")
 DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
 
-# Gradio settings
+# Gradio settings (DEPRECATED - Gradio frontend removed)
 GRADIO_HOST = os.getenv("GRADIO_HOST", "127.0.0.1")
 GRADIO_PORT = int(os.getenv("GRADIO_PORT", "7860"))
 GRADIO_SHARE = os.getenv("GRADIO_SHARE", "false").lower() == "true"
@@ -64,6 +64,7 @@ class Config:
         self.debug = DEBUG
         self.log_level = LOG_LEVEL
         self.llm_endpoint = LLM_ENDPOINT
+        # DEPRECATED: Gradio frontend removed, keeping for backward compatibility
         self.gradio_host = GRADIO_HOST
         self.gradio_port = GRADIO_PORT
         self.gradio_share = GRADIO_SHARE

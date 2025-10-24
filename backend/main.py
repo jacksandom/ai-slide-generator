@@ -25,7 +25,7 @@ try:
 except Exception:
     print("Warning: UC tools not available; starting without UC_tools.")
     TOOL_DICT = {}
-# from slide_generator.core import chatbot  # No longer needed with new agent
+# Legacy chatbot.py removed - now using LangGraph-based agent
 from slide_generator.config import config
 from databricks.sdk import WorkspaceClient
 

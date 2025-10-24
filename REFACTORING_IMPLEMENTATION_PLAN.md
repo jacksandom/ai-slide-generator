@@ -31,7 +31,7 @@ git checkout -b phase1-remove-duplicates
 
 ### Pre-Implementation Validation
 
-#### Step 1.0: Create Baseline Tests
+What updates do you have? #### Step 1.0: Create Baseline Tests
 ```bash
 # Document current functionality
 git checkout refactor-main

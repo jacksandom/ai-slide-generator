@@ -60,13 +60,22 @@ gradio-legacy = [
     "gradio>=4.0.0",
 ]
 dev = [
+    # Existing dev dependencies
     "pytest>=7.0",
     "pytest-cov",
-    "black>=22.0",
+    "black>=22.0", 
     "flake8>=5.0",
     "mypy>=1.0",
     "pre-commit>=2.20",
     "isort>=5.10",
+    
+    # Additional testing dependencies for Phase 1.5
+    "pytest-asyncio>=0.21.0",  # For FastAPI async tests
+    "pytest-mock>=3.10.0",     # For mocking Databricks responses  
+    "httpx>=0.24.0",           # For FastAPI TestClient
+    "pytest-html>=3.1.0",     # For HTML test reports
+    "aiohttp>=3.8.0",         # For load testing
+    "psutil>=5.9.0",          # For memory monitoring tests
 ]
 docs = [
     "mkdocs>=1.4",
@@ -160,6 +169,9 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
+    "e2e: marks tests as end-to-end tests",
+    "performance: marks tests as performance/load tests",
+    "databricks: marks tests that require Databricks authentication",
 ]
 
 # Coverage configuration

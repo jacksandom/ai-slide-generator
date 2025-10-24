@@ -1,0 +1,27 @@
+{
+  "slides": [
+    {
+      "id": "slide_1",
+      "title": "Introduction to AI",
+      "content": "Artificial Intelligence is transforming how we work and live.",
+      "html": "<!DOCTYPE html><html><head><title>Introduction to AI</title></head><body style=\"width:1280px;height:720px;\"><h1 style=\"color:#102025;\">Introduction to AI</h1><p>Artificial Intelligence is transforming how we work and live.</p></body></html>"
+    },
+    {
+      "id": "slide_2", 
+      "title": "Machine Learning Basics",
+      "content": "Machine learning is a subset of AI that enables computers to learn from data.",
+      "html": "<!DOCTYPE html><html><head><title>Machine Learning Basics</title></head><body style=\"width:1280px;height:720px;\"><h1 style=\"color:#102025;\">Machine Learning Basics</h1><p>Machine learning is a subset of AI that enables computers to learn from data.</p></body></html>"
+    },
+    {
+      "id": "slide_3",
+      "title": "Future Applications", 
+      "content": "AI will continue to revolutionize healthcare, finance, and transportation.",
+      "html": "<!DOCTYPE html><html><head><title>Future Applications</title></head><body style=\"width:1280px;height:720px;\"><h1 style=\"color:#102025;\">Future Applications</h1><p>AI will continue to revolutionize healthcare, finance, and transportation.</p></body></html>"
+    }
+  ],
+  "metadata": {
+    "created_at": "2024-10-24T10:00:00Z",
+    "session_id": "test_session_123",
+    "total_slides": 3
+  }
+}

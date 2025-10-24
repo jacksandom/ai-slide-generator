@@ -118,3 +118,4 @@ backend/__pycache__/
 backend/*.pyc
 backend/.env
 venv/
+src/slide_generator.egg-info/

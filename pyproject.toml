@@ -25,18 +25,39 @@ classifiers = [
 ]
 requires-python = ">=3.9"
 dependencies = [
-    "gradio>=4.0.0",
+    # Core slide generator dependencies
     "databricks-sdk>=0.20.0",
     "pathlib",
     "typing-extensions",
+    "pydantic>=2.0.0",
+    "beautifulsoup4>=4.12.0",
+    
+    # FastAPI backend dependencies
     "fastapi>=0.116.1",
-    "uvicorn>=0.35.0",
+    "uvicorn[standard]>=0.35.0", 
+    "python-multipart>=0.0.6",
+    "websockets>=11.0",
+    
+    # Unity Catalog and Databricks dependencies
+    "unitycatalog-ai",
+    "databricks-connect",
+    "openai",
+    "databricks-sdk[openai]",
+    
+    # LangChain dependencies
+    "langchain-core>=0.1.0",
+    "langchain-databricks>=0.1.0", 
+    "langchain>=0.1.0",
+    "langgraph>=0.1.0",
+    
+    # Additional data handling
+    "pandas>=2.0.0",
 ]
 
 [project.optional-dependencies]
-langchain = [
-    "langchain-databricks>=0.1.0",
-    "langchain-core>=0.2.0",
+# Legacy gradio support (deprecated)
+gradio-legacy = [
+    "gradio>=4.0.0",
 ]
 dev = [
     "pytest>=7.0",
@@ -115,7 +136,7 @@ strict_equality = true
 
 [[tool.mypy.overrides]]
 module = [
-    "gradio.*",
+    # "gradio.*",  # REMOVED: Gradio frontend deprecated
     "databricks.*",
     "langchain.*",
 ]

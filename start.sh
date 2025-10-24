@@ -76,14 +76,14 @@ source .venv/bin/activate
 
 # Install Python dependencies
 print_info "Installing Python dependencies..."
-if [ -f "requirements.txt" ]; then
-    print_status "Installing main Python requirements"
-    pip3 install -r requirements.txt
-fi
-
-if [ -f "backend/requirements.txt" ]; then
-    print_status "Installing backend Python requirements"
-    pip3 install -r backend/requirements.txt
+if [ -f "pyproject.toml" ]; then
+    print_status "Installing Python dependencies from pyproject.toml"
+    pip3 install -e .
+else
+    print_warning "pyproject.toml not found - using fallback requirements.txt"
+    if [ -f "requirements.txt" ]; then
+        pip3 install -r requirements.txt
+    fi
 fi
 
 # Install Node.js dependencies

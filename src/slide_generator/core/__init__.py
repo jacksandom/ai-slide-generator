@@ -1,7 +1,6 @@
 """Core business logic for slide generation."""
 
-# Note: Chatbot is deprecated in favor of the new LangGraph agent
-# from .chatbot import Chatbot
+# Note: Legacy chatbot.py removed - replaced by LangGraph agent (html_slides_agent.py)
 
 try:
     from .chatbot_langchain import ChatbotLangChain

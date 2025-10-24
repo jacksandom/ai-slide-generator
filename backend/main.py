@@ -25,13 +25,13 @@ try:
 except Exception:
     print("Warning: UC tools not available; starting without UC_tools.")
     TOOL_DICT = {}
-# from slide_generator.core import chatbot  # No longer needed with new agent
+# Legacy chatbot.py removed - now using LangGraph-based agent
 from slide_generator.config import config
 from databricks.sdk import WorkspaceClient
 
 # Initialize Databricks client and components
 # Use explicit profile so local dev can auth with the intended workspace
-ws = WorkspaceClient(profile='e2-demo', product='slide-generator')
+ws = WorkspaceClient(profile='logfood', product='slide-generator')
 
 def get_logo_base64():
     """Load the EY-Parthenon logo and encode it as base64 for embedding in HTML."""

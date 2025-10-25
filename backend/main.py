@@ -50,12 +50,62 @@ def get_logo_base64():
         print(f"Warning: Logo file not found at {logo_path}")
         return ""
 
-# Initialize chatbot and conversation state with neutral branding (no EY watermark)
-ey_theme = html_slides_agent.SlideTheme(
-    bottom_right_logo_url=None,
-    footer_text=None
-)
-slide_agent = html_slides_agent.SlideDeckAgent(theme=ey_theme)
+# Session management - replaces global state
+class SessionManager:
+    """Manages per-session slide agents and conversation state."""
+    
+    def __init__(self):
+        self.sessions: Dict[str, Dict] = {}
+        # Default theme for slide agents
+        self.default_theme = html_slides_agent.SlideTheme(
+            bottom_right_logo_url=None,
+            footer_text=None
+        )
+    
+    def get_or_create_session(self, session_id: str) -> Dict:
+        """Get or create session data including agent and conversation."""
+        if session_id not in self.sessions:
+            self.sessions[session_id] = {
+                'slide_agent': html_slides_agent.SlideDeckAgent(theme=self.default_theme),
+                'conversation': {
+                    'openai_conversation': [{"role": "system", "content": config.system_prompt}],
+                    'api_conversation': []
+                },
+                'created_at': time.time()
+            }
+        return self.sessions[session_id]
+    
+    def get_slide_agent(self, session_id: str) -> html_slides_agent.SlideDeckAgent:
+        """Get the slide agent for a session."""
+        session = self.get_or_create_session(session_id)
+        return session['slide_agent']
+    
+    def reset_session_agent(self, session_id: str) -> None:
+        """Reset the slide agent for a session."""
+        session = self.get_or_create_session(session_id)
+        session['slide_agent'] = html_slides_agent.SlideDeckAgent(theme=self.default_theme)
+    
+    def clear_session_agent(self, session_id: str) -> None:
+        """Clear the slide agent state but keep the agent instance."""
+        session = self.get_or_create_session(session_id)
+        agent = session['slide_agent']
+        if agent is not None:
+            agent.initial_state.update({
+                "todos": [],
+                "artifacts": {},
+                "status": [],
+                "messages": [],
+                "config": html_slides_agent.SlideConfig(),
+                "config_version": 0,
+                "last_intent": None,
+                "pending_changes": [],
+                "errors": [],
+                "metrics": {},
+                "run_id": ""
+            })
+
+# Global session manager instance
+session_manager = SessionManager()
 
 # Initialize FastAPI app
 app = FastAPI(title="Slide Generator API", version="1.0.0")
@@ -69,8 +119,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global conversation state (in production, use proper session management)
-conversations: Dict[str, Dict] = {}
+# Global state removed - now using SessionManager for proper session isolation
 
 # --- Demo static mode -------------------------------------------------------
 # When enabled, any user prompt will render a predefined set of static slides
@@ -79,8 +128,8 @@ conversations: Dict[str, Dict] = {}
 DEMO_STATIC_MODE: bool = True
 
 def _append_api_message(session_id: str, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
-    conv = get_or_create_conversation(session_id)
-    conv["api_conversation"].append(ChatMessage(role=role, content=content, metadata=metadata))
+    session = session_manager.get_or_create_session(session_id)
+    session["conversation"]["api_conversation"].append(ChatMessage(role=role, content=content, metadata=metadata))
 
 
 
@@ -88,19 +137,16 @@ def _append_api_message(session_id: str, role: str, content: str, metadata: Opti
 
 def _run_llm_flow(session_id: str, user_prompt: str) -> None:
     """Run the new LLM-based slide generation flow with user prompt"""
-    global slide_agent
-    
     try:
+        # Get session-specific slide agent
+        slide_agent = session_manager.get_slide_agent(session_id)
+        
         # Check if this is a follow-on request or first-time request
         is_follow_on = slide_agent is not None and slide_agent.initial_state.get("todos") and len(slide_agent.initial_state.get("artifacts", {})) > 0
         
         if not is_follow_on:
-            # First-time request: create new agent if needed
-            if slide_agent is None:
-                print(f"[DEBUG] LLM Flow - Creating new agent for first-time request")
-                slide_agent = html_slides_agent.SlideDeckAgent(theme=ey_theme)
-            else:
-                print(f"[DEBUG] LLM Flow - Reusing existing agent for first-time request")
+            # First-time request: agent already created by session manager
+            print(f"[DEBUG] LLM Flow - Using session agent for first-time request")
             
             _append_api_message(
                 session_id,
@@ -195,8 +241,9 @@ def _run_llm_flow(session_id: str, user_prompt: str) -> None:
 
 def _run_prism_flow(session_id: str) -> None:
     try:
-        global slide_agent
-        slide_agent = html_slides_agent.SlideDeckAgent(theme=ey_theme)
+        # Reset the session agent for demo mode
+        session_manager.reset_session_agent(session_id)
+        slide_agent = session_manager.get_slide_agent(session_id)
 
         PRISM_SLIDES: List[str] = [
             """<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"/><meta content=\"width=device-width, initial-scale=1.0\" name=\"viewport\"/><title>Project Prism - The Opportunity</title><link href=\"https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css\" rel=\"stylesheet\"/><link href=\"https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css\" rel=\"stylesheet\"/><link href=\"https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap\" rel=\"stylesheet\"/><style>body{font-family:'Roboto',sans-serif;background-color:white;color:#1A365D;margin:0;padding:0}.slide-container{width:1280px;min-height:720px;overflow:hidden;position:relative}.header{padding:0 60px 8px}.header h1{margin:0}.content{padding:0 60px}.opportunity-icon{color:#FF5722;font-size:48px;margin-bottom:20px}.cost-icon{color:#FF5722;font-size:48px;margin-bottom:20px}.separator{width:2px;background-color:#E2E8F0;height:400px}.accent-text{color:#FF5722;font-weight:500}</style></head><body><div class=\"slide-container\"><div class=\"header\"><h1 class=\"text-3xl font-bold\">The Opportunity: AI Slide Generation for Consulting</h1></div><div class=\"content\"><div class=\"flex justify-between items-start\"><div class=\"w-1/2 pr-10\"><div class=\"opportunity-icon\"><i class=\"fas fa-lightbulb\"></i></div><h2 class=\"text-xl font-semibold mb-4\">Transforming Slide Creation for Consulting</h2><p class=\"mb-4\">Imagine if consulting firms could <span class=\"accent-text\">instantly create tailored, secure slides</span> from proprietary know-how &amp; sensitive client data—<span class=\"accent-text\">automagically</span>.</p><ul class=\"list-disc pl-5 space-y-2\"><li>Leverage existing firm knowledge bases and client data</li><li>Maintain security and compliance across all materials</li><li>Generate high-quality slides that align with firm branding</li></ul><p class=\"mt-4\">Unlocking immediate value for industry leaders:</p><div class=\"flex space-x-4 mt-2\"><span class=\"font-semibold\">EY</span><span class=\"font-semibold\">KPMG</span><span class=\"font-semibold\">BCG</span><span class=\"font-semibold\">+ more</span></div></div><div class=\"separator mx-8\"></div><div class=\"w-1/2 pl-10\"><div class=\"cost-icon\"><i class=\"fas fa-chart-line\"></i></div><h2 class=\"text-xl font-semibold mb-4\">The Cost of Manual Slide Creation</h2><div class=\"mb-4\"><span class=\"text-4xl font-bold accent-text\">4 hours</span><span class=\"text-xl ml-2\">spent daily on slide creation</span></div><div class=\"bg-gray-50 p-4 rounded-lg mb-4\"><p class=\"font-semibold mb-2\">Impact per consultant:</p><table class=\"w-full\"><tr><td>Daily hours on slides:</td><td class=\"text-right\">4 hours</td></tr><tr><td>Average billing rate:</td><td class=\"text-right\">$300/hour</td></tr><tr class=\"border-t border-gray-300\"><td class=\"font-semibold\">Daily cost:</td><td class=\"text-right font-semibold\">$1,200</td></tr><tr><td class=\"font-semibold\">Annual cost (250 days):</td><td class=\"text-right font-semibold\">$300,000</td></tr></table></div><p class=\"mt-4\"><span class=\"accent-text font-semibold\">Project Prism</span> converts wasted hours into billable client value—increasing impact and profitability.</p></div></div></div></div></body></html>""",
@@ -491,13 +538,9 @@ def openai_to_api_message(openai_msg: Dict) -> List[ChatMessage]:
     return []
 
 def get_or_create_conversation(session_id: str) -> Dict:
-    """Get or create conversation for session"""
-    if session_id not in conversations:
-        conversations[session_id] = {
-            "openai_conversation": [{"role": "system", "content": config.system_prompt}],
-            "api_conversation": []
-        }
-    return conversations[session_id]
+    """Get or create conversation for session using session manager"""
+    session = session_manager.get_or_create_session(session_id)
+    return session["conversation"]
 
 def update_conversations_with_openai_message(session_id: str, openai_msg: Dict):
     """Add OpenAI message to both conversation lists"""
@@ -559,9 +602,10 @@ async def get_chat_status(session_id: str):
     }
 
 @app.get("/slides/html", response_model=SlidesResponse)
-async def get_slides_html():
+async def get_slides_html(session_id: str = "default"):
     """Get current slides as list of HTML strings"""
     try:
+        slide_agent = session_manager.get_slide_agent(session_id)
         print(f"[DEBUG] get_slides_html - slide_agent: {slide_agent}")
         
         slides_list = slide_agent.get_slides()
@@ -575,47 +619,31 @@ async def get_slides_html():
         raise HTTPException(status_code=500, detail=f"Error getting slides: {str(e)}")
 
 @app.post("/slides/refresh")
-async def refresh_slides():
+async def refresh_slides(session_id: str = "default"):
     """Refresh slides display"""
     try:
+        slide_agent = session_manager.get_slide_agent(session_id)
         slides_list = slide_agent.get_slides()
         return {"slides": slides_list}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error refreshing slides: {str(e)}")
 
 @app.post("/slides/reset")
-async def reset_slides():
+async def reset_slides(session_id: str = "default"):
     """Reset slides to empty deck"""
     try:
-        # Create new agent with same theme
-        global slide_agent
-        slide_agent = html_slides_agent.SlideDeckAgent(theme=ey_theme)
-        print(f"[DEBUG] reset_slides - Created new agent, resetting state")
+        session_manager.reset_session_agent(session_id)
+        print(f"[DEBUG] reset_slides - Reset session agent for session {session_id}")
         return {"message": "Slides reset successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error resetting slides: {str(e)}")
 
 @app.post("/slides/clear")
-async def clear_slides():
+async def clear_slides(session_id: str = "default"):
     """Clear current slides but keep the agent instance for follow-on requests"""
     try:
-        global slide_agent
-        if slide_agent is not None:
-            # Clear the state but keep the agent instance
-            slide_agent.initial_state.update({
-                "todos": [],
-                "artifacts": {},
-                "status": [],
-                "messages": [],
-                "config": html_slides_agent.SlideConfig(),
-                "config_version": 0,
-                "last_intent": None,
-                "pending_changes": [],
-                "errors": [],
-                "metrics": {},
-                "run_id": ""
-            })
-            print(f"[DEBUG] clear_slides - Cleared agent state")
+        session_manager.clear_session_agent(session_id)
+        print(f"[DEBUG] clear_slides - Cleared session agent state for session {session_id}")
         return {"message": "Slides cleared successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error clearing slides: {str(e)}")
@@ -627,6 +655,10 @@ async def generate_slides(request: Dict[str, Any]):
         topic = request.get("topic", "AI and Machine Learning")
         style_hint = request.get("style_hint", "Professional, clean, modern")
         n_slides = request.get("n_slides", 3)
+        session_id = request.get("session_id", "default")
+        
+        # Get session-specific slide agent
+        slide_agent = session_manager.get_slide_agent(session_id)
         
         # Use the new LLM-based generation
         result = slide_agent.process_message(
@@ -647,6 +679,10 @@ async def modify_slide(request: Dict[str, Any]):
     try:
         slide_id = request.get("slide_id", 1)
         changes = request.get("changes", [])
+        session_id = request.get("session_id", "default")
+        
+        # Get session-specific slide agent
+        slide_agent = session_manager.get_slide_agent(session_id)
         
         # Convert changes to a natural language request
         change_description = f"Modify slide {slide_id}: " + "; ".join(changes)
@@ -661,9 +697,10 @@ async def modify_slide(request: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=f"Error modifying slide: {str(e)}")
 
 @app.get("/slides/status")
-async def get_slides_status():
+async def get_slides_status(session_id: str = "default"):
     """Get current slides status"""
     try:
+        slide_agent = session_manager.get_slide_agent(session_id)
         status = slide_agent.get_status()
         return {
             "status": [{"id": s.id, "title": s.title, "is_generated": s.is_generated, "is_valid": s.is_valid} for s in status],
@@ -673,9 +710,10 @@ async def get_slides_status():
         raise HTTPException(status_code=500, detail=f"Error getting slides status: {str(e)}")
 
 @app.post("/slides/export")
-async def export_slides():
+async def export_slides(session_id: str = "default"):
     """Export slides to file"""
     try:
+        slide_agent = session_manager.get_slide_agent(session_id)
         output_path = config.get_output_path("exported_slides.html")
         saved_files = slide_agent.save_slides(str(output_path.parent))
         return {"message": f"Slides exported successfully to {len(saved_files)} files", "path": str(output_path)}
@@ -683,7 +721,7 @@ async def export_slides():
         raise HTTPException(status_code=500, detail=f"Error exporting slides: {str(e)}")
 
 @app.get("/slides/export/pptx")
-async def export_slides_pptx() -> FileResponse:
+async def export_slides_pptx(session_id: str = "default") -> FileResponse:
     """Export the current deck to a PPTX file and stream it back.
 
     Uses the HtmlToPptxConverter from tools/html_to_pptx.py (pulled from export-visuals branch).
@@ -718,6 +756,8 @@ async def export_slides_pptx() -> FileResponse:
                 """Get the slide theme."""
                 return self.agent.theme
         
+        # Get session-specific slide agent
+        slide_agent = session_manager.get_slide_agent(session_id)
         adapter = SlideDeckAgentAdapter(slide_agent)
         converter = HtmlToPptxConverter(adapter)
         await converter.convert_to_pptx(str(output_path), include_charts=True)

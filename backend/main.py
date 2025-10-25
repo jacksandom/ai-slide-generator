@@ -6,16 +6,19 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 import time
+import json
+import asyncio
 
 # Import slide generator modules
 import sys
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from slide_generator.tools import html_slides_agent
+from slide_generator.tools.html_slides_agent_fanout import FanOutSlideDeckAgent, FanOutProgressTracker
 from slide_generator.config import config, get_output_path
 
 # Initialize slide agent with neutral branding
@@ -23,7 +26,12 @@ ey_theme = html_slides_agent.SlideTheme(
     bottom_right_logo_url=None,
     footer_text=None
 )
-slide_agent = html_slides_agent.SlideDeckAgent(theme=ey_theme)
+
+# Use fan-out agent for better performance and parallel Genie calls
+slide_agent = FanOutSlideDeckAgent(theme=ey_theme)
+
+# Global variable to store the latest slides
+latest_slides = []
 
 # Initialize V3 PowerPoint converter
 try:
@@ -176,6 +184,125 @@ def _run_llm_flow(session_id: str, user_prompt: str) -> None:
             metadata={"title": "Error"}
         )
 
+def _run_llm_flow_streaming(session_id: str, user_prompt: str) -> None:
+    """Run the LLM flow with streaming progress updates"""
+    global slide_agent
+    
+    try:
+        # Check if this is a follow-on request or first-time request
+        is_follow_on = slide_agent is not None and slide_agent.initial_state.get("todos") and len(slide_agent.initial_state.get("artifacts", {})) > 0
+        
+        # Create progress tracker with callback to append API messages
+        def progress_callback(update):
+            """Callback function to send progress updates to the chat"""
+            progress_text = f"🔄 {update.step} ({update.progress_percent}%)"
+            if update.details:
+                progress_text += f" - {update.details}"
+            if update.current_slide_title:
+                progress_text += f" - Working on: {update.current_slide_title}"
+            
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content=progress_text,
+                metadata={
+                    "title": "Progress Update",
+                    "progress": update.model_dump()
+                }
+            )
+        
+        progress_tracker = html_slides_agent.ProgressTracker(session_id, progress_callback)
+        
+        if not is_follow_on:
+            # First-time request: create new agent with progress tracking
+            if slide_agent is None:
+                print(f"[DEBUG] Streaming Flow - Creating new agent for first-time request")
+                slide_agent = html_slides_agent.SlideDeckAgent(theme=ey_theme, progress_tracker=progress_tracker)
+            else:
+                print(f"[DEBUG] Streaming Flow - Reusing existing agent for first-time request")
+                slide_agent.progress_tracker = progress_tracker
+            
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content=(
+                    "I'll analyze your request and generate a professional slide deck using AI. "
+                    "You'll see progress updates as I work through each step."
+                ),
+            )
+        else:
+            # Follow-on request: reuse existing agent with new progress tracker
+            print(f"[DEBUG] Streaming Flow - Reusing existing agent for follow-on request")
+            slide_agent.progress_tracker = progress_tracker
+            
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content="I'll process your follow-on request and update the existing slide deck. You'll see progress updates as I work.",
+            )
+
+        print(f"[DEBUG] Streaming Flow - Processing user prompt: {user_prompt}")
+        
+        # Use the agent's streaming method
+        import time
+        process_start = time.time()
+        result = slide_agent.process_message(user_prompt)  # Use regular method for now
+        process_time = time.time() - process_start
+        print(f"[DEBUG] Streaming Flow - process_message completed in {process_time:.2f}s")
+        
+        # Step 3: Check if slides were generated
+        slides = result.get("slides", [])
+        print(f"[DEBUG] Streaming Flow - Generated {len(slides)} slides")
+        
+        if not slides:
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content="❌ No slides were generated. Please try a different request.",
+                metadata={"title": "Agent tool result"}
+            )
+            return
+        
+        # Step 4: Show final success message
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content=f"✅ Generated {len(slides)} slides successfully",
+            metadata={"title": "Agent tool result"}
+        )
+        
+        # Step 5: Show final status
+        status_list = result.get("status", [])
+        status_text = "\n".join([f"Slide {s.position}: {s.title}" for s in status_list])
+        print(f"[DEBUG] Streaming Flow - Status: {status_text}")
+        
+        if is_follow_on:
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content=f"Slide deck updated successfully!\n\n{status_text}"
+            )
+        else:
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content=f"Slide deck created successfully!\n\n{status_text}"
+            )
+        
+        # Signal completion to stop frontend polling
+        _append_api_message(session_id, role="assistant", content="Generation complete.", metadata={"title": "Done"})
+        
+    except Exception as e:
+        print(f"[ERROR] Streaming Flow - Error processing request: {e}")
+        import traceback
+        traceback.print_exc()
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content=f"❌ Error processing your request: {str(e)}",
+            metadata={"title": "Error"}
+        )
+
 
 # Pydantic models for API requests/responses
 class ChatMessage(BaseModel):
@@ -215,13 +342,239 @@ async def chat(request: ChatRequest):
             conv = get_or_create_conversation(session_id)
             return ChatResponse(messages=conv, session_id=session_id)
         
-        # Process the LLM flow
-        _run_llm_flow(session_id, user_input)
+        # Process the LLM flow with streaming updates
+        _run_llm_flow_streaming(session_id, user_input)
         conv = get_or_create_conversation(session_id)
         return ChatResponse(messages=conv, session_id=session_id)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing chat: {str(e)}")
+
+@app.get("/chat/history/{session_id}", response_model=ChatResponse)
+async def get_chat_history(session_id: str):
+    """Get conversation history for a session"""
+    try:
+        conv = get_or_create_conversation(session_id)
+        return ChatResponse(messages=conv, session_id=session_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting chat history: {str(e)}")
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """Handle chat messages with real-time streaming using Server-Sent Events and Fan-out Agent"""
+    try:
+        session_id = request.session_id
+        user_input = request.message.strip()
+        
+        if not user_input:
+            raise HTTPException(status_code=400, detail="Message cannot be empty")
+        
+        # Add user message to conversation history
+        _append_api_message(session_id, role="user", content=user_input)
+        
+        async def event_generator():
+            """Generate Server-Sent Events for real-time updates using Fan-out Agent"""
+            global slide_agent
+            
+            try:
+                # Check if this is a follow-on request or first-time request
+                is_follow_on = slide_agent is not None and slide_agent.initial_state.get("todos") and len(slide_agent.initial_state.get("artifacts", {})) > 0
+                
+                # Create fan-out progress tracker with async callback to send SSE events
+                async def progress_callback(update):
+                    """Async callback function to send progress updates via SSE"""
+                    progress_data = {
+                        "type": "progress",
+                        "step": update.step,
+                        "progress_percent": update.progress_percent,
+                        "details": update.details,
+                        "slides_completed": update.slides_completed,
+                        "total_slides": update.total_slides,
+                        "current_slide_title": update.current_slide_title,
+                        "elapsed_time": update.elapsed_time,
+                        "error": update.error,
+                        "branch_id": update.branch_id
+                    }
+                    # Note: We'll handle progress updates in the main loop
+                
+                progress_tracker = FanOutProgressTracker(session_id, progress_callback)
+                print(f"[MAIN] Created fan-out progress_tracker: {progress_tracker}")
+                
+                if not is_follow_on:
+                    # First-time request: create new fan-out agent with progress tracking
+                    if slide_agent is None:
+                        print(f"[STREAM] Creating new fan-out agent for first-time request")
+                        slide_agent = FanOutSlideDeckAgent(theme=ey_theme, progress_tracker=progress_tracker)
+                    else:
+                        print(f"[STREAM] Reusing existing fan-out agent for first-time request")
+                        slide_agent.progress_tracker = progress_tracker
+                    
+                    # Send initial message
+                    initial_msg = "I'll analyze your request and generate a professional slide deck using AI with parallel processing and Genie integration. You'll see real-time progress updates as I work through each step."
+                    yield f"data: {json.dumps({'type': 'message', 'content': initial_msg})}\n\n"
+                else:
+                    # Follow-on request: reuse existing agent with new progress tracker
+                    print(f"[STREAM] Reusing existing fan-out agent for follow-on request")
+                    slide_agent.progress_tracker = progress_tracker
+                    
+                    # Send initial message
+                    follow_on_msg = "I'll process your follow-on request and update the existing slide deck with parallel processing. You'll see real-time progress updates as I work."
+                    yield f"data: {json.dumps({'type': 'message', 'content': follow_on_msg})}\n\n"
+                
+                print(f"[STREAM] Processing user prompt with fan-out agent: {user_input}")
+                
+                # Use fan-out agent's streaming method for better performance and parallel Genie calls
+                final_state = None
+                
+                async for chunk in slide_agent.process_message_streaming_async(
+                    user_input, 
+                    run_id=f"run_{int(time.time())}",
+                    max_concurrency=3  # Allow up to 3 parallel slides
+                ):
+                    node = chunk.get("node")
+                    progress = chunk.get("progress", 0)
+                    state = chunk.get("state", {})
+                    result = chunk.get("result")
+                    
+                    print(f"[STREAM] Fan-out chunk: node={node}, progress={progress}%")
+                    
+                    # Check for pending updates from progress_tracker
+                    if progress_tracker and hasattr(progress_tracker, 'get_pending_updates'):
+                        pending_updates = progress_tracker.get_pending_updates()
+                        for update in pending_updates:
+                            progress_data = {
+                                "type": "progress",
+                                "step": update.step,
+                                "progress_percent": update.progress_percent,
+                                "details": update.details,
+                                "slides_completed": update.slides_completed,
+                                "total_slides": update.total_slides,
+                                "current_slide_title": update.current_slide_title,
+                                "elapsed_time": update.elapsed_time,
+                                "error": update.error,
+                                "branch_id": update.branch_id
+                            }
+                            print(f"[STREAM] Yielding pending update: {update.step}")
+                            yield f"data: {json.dumps(progress_data)}\n\n"
+                    
+                    # Handle different node types
+                    if node == "complete":
+                        # Final completion
+                        final_state = result
+                        print(f"[STREAM] Generation completed successfully")
+                        
+                        if result and result.get("success"):
+                            slides_generated = len(result.get("slides", []))
+                            completion_msg = f"✅ Successfully generated {slides_generated} slides with parallel processing and Genie integration!"
+                            
+                            # Send completion message
+                            yield f"data: {json.dumps({'type': 'message', 'content': completion_msg})}\n\n"
+                            
+                            # Emit final slides update so frontend renders without manual refresh
+                            try:
+                                slides_list = result.get("slides", []) or []
+                                if not slides_list and slide_agent is not None:
+                                    # Fallback to agent slides
+                                    slides_list = slide_agent.get_slides() or []
+                                if not slides_list and isinstance(final_state, dict):
+                                    # Fallback to artifacts in final state
+                                    artifacts = final_state.get("artifacts", {}) or {}
+                                    if isinstance(artifacts, dict):
+                                        slides_list = list(artifacts.values())
+                                # Cache globally so GET /slides/html is immediately consistent
+                                latest_slides = slides_list
+                                slides_event = {"type": "slides_update", "slides": slides_list}
+                                yield f"data: {json.dumps(slides_event)}\n\n"
+                            except Exception as _e:
+                                print(f"[STREAM] slides_update emission (complete) failed: {_e}")
+                            
+                            # Update conversation history
+                            _append_api_message(
+                                session_id,
+                                role="assistant",
+                                content=completion_msg,
+                                metadata={"slides_generated": slides_generated, "parallel_genie_calls": True}
+                            )
+                        else:
+                            error_msg = "❌ Generation failed. Please try again."
+                            yield f"data: {json.dumps({'type': 'message', 'content': error_msg})}\n\n"
+                            
+                    elif node == "error":
+                        # Error handling
+                        error_msg = result.get("error", "Unknown error occurred")
+                        print(f"[STREAM] Generation error: {error_msg}")
+                        yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
+                        
+                    else:
+                        # Node completion
+                        node_data = {
+                            "type": "node_complete",
+                            "node": node,
+                            "progress": progress,
+                            "details": f"Completed {node} step"
+                        }
+                        yield f"data: {json.dumps(node_data)}\n\n"
+                        
+                        # Emit slides_update on key nodes so frontend updates automatically
+                        try:
+                            if node in ("join_results", "status"):
+                                slides_list = []
+                                # Prefer agent-rendered slides
+                                if slide_agent is not None:
+                                    slides_list = slide_agent.get_slides() or []
+                                # Fallback to state artifacts if needed
+                                if not slides_list and isinstance(state, dict):
+                                    artifacts = state.get("artifacts", {}) or {}
+                                    if isinstance(artifacts, dict):
+                                        slides_list = list(artifacts.values())
+                                # Only emit if we have something meaningful
+                                if slides_list:
+                                    # Cache globally
+                                    latest_slides = slides_list
+                                    slides_event = {"type": "slides_update", "slides": slides_list}
+                                    yield f"data: {json.dumps(slides_event)}\n\n"
+                        except Exception as _e:
+                            print(f"[STREAM] slides_update emission failed on node '{node}': {_e}")
+                        
+                        # Capture state for final update
+                        if state:
+                            final_state = state
+                
+                # Update the agent's state with the final result
+                if final_state:
+                    print(f"[STREAM] Updating agent state with final state")
+                    print(f"[STREAM] Final state keys: {list(final_state.keys())}")
+                    
+                    # Update the agent's initial_state with the final state
+                    for key, value in final_state.items():
+                        if key in slide_agent.initial_state:
+                            slide_agent.initial_state[key] = value
+                    
+                    print(f"[STREAM] Agent state updated. Status count: {len(slide_agent.initial_state.get('status', []))}")
+                    print(f"[STREAM] Agent state updated. Artifacts count: {len(slide_agent.initial_state.get('artifacts', {}))}")
+                
+                # Send done event
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                
+            except Exception as e:
+                print(f"[STREAM ERROR] {e}")
+                import traceback
+                traceback.print_exc()
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing streaming chat: {str(e)}")
 
 
 @app.get("/chat/status/{session_id}")
@@ -234,16 +587,45 @@ async def get_chat_status(session_id: str):
         "message_count": len(conv)
     }
 
+@app.get("/debug/agent")
+async def debug_agent():
+    """Debug endpoint to check agent state"""
+    return {
+        "slide_agent_exists": slide_agent is not None,
+        "slide_agent_type": type(slide_agent).__name__ if slide_agent else None,
+        "initial_state_keys": list(slide_agent.initial_state.keys()) if slide_agent else [],
+        "status_count": len(slide_agent.initial_state.get("status", [])) if slide_agent else 0,
+        "artifacts_count": len(slide_agent.initial_state.get("artifacts", {})) if slide_agent else 0
+    }
+
 @app.get("/slides/html", response_model=SlidesResponse)
 async def get_slides_html():
     """Get current slides as list of HTML strings"""
     try:
         print(f"[DEBUG] get_slides_html - slide_agent: {slide_agent}")
+        print(f"[DEBUG] get_slides_html - slide_agent is None: {slide_agent is None}")
+        
+        if slide_agent is None:
+            print(f"[DEBUG] get_slides_html - No slide agent, returning empty slides")
+            return SlidesResponse(slides=[])
         
         slides_list = slide_agent.get_slides()
         print(f"[DEBUG] get_slides_html - slides count: {len(slides_list)}")
         if slides_list:
             print(f"[DEBUG] get_slides_html - first slide preview: {slides_list[0][:200]}...")
+        
+        # If get_slides() returns empty, try getting from artifacts directly
+        if not slides_list and 'artifacts' in slide_agent.initial_state:
+            artifacts = slide_agent.initial_state['artifacts']
+            print(f"[DEBUG] get_slides_html - artifacts count: {len(artifacts)}")
+            slides_list = list(artifacts.values())
+            print(f"[DEBUG] get_slides_html - slides from artifacts: {len(slides_list)}")
+        
+        # If still empty, try getting from global latest_slides
+        if not slides_list:
+            global latest_slides
+            print(f"[DEBUG] get_slides_html - latest_slides count: {len(latest_slides)}")
+            slides_list = latest_slides
         
         return SlidesResponse(slides=slides_list)
     except Exception as e:

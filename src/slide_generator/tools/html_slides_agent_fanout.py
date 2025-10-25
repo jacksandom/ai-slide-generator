@@ -1,11 +1,14 @@
-"""LangGraph-based HTML slide deck generator with proper agent architecture.
+"""LangGraph fan-out based HTML slide deck generator.
 
-This module provides a clean, modular approach to generating HTML slides using LangGraph:
-- Proper separation of concerns with individual nodes
-- Clean state management with Pydantic models
-- Modular tools for different operations
-- Clear routing and conditional edges
-- Better error handling and validation
+This module implements a fan-out/fan-in architecture using LangGraph's Send/Command
+for true parallel processing of slide generation tasks.
+
+Key improvements over the original:
+- Native LangGraph parallelism using Send/Command
+- Better error isolation and handling
+- Cleaner state management
+- More granular progress tracking
+- Dynamic resource allocation
 """
 
 from __future__ import annotations
@@ -16,17 +19,28 @@ import time
 import copy
 import threading
 import pandas as pd
-from typing import List, Dict, Literal, Optional, Annotated, TypedDict, AsyncGenerator
+from typing import List, Dict, Literal, Optional, Annotated, TypedDict, AsyncGenerator, Any
 from pydantic import BaseModel, Field, conint
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 from bs4 import BeautifulSoup
 from bs4.element import Tag
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, START, END
+from langgraph.types import Send, Command
 from langgraph.config import get_stream_writer
 from langchain.tools import tool
 from databricks.sdk import WorkspaceClient
+from operator import add
+
+def merge_dicts(left: Dict[str, Any], right: Dict[str, Any]) -> Dict[str, Any]:
+    """Custom reducer for merging dictionaries in concurrent updates."""
+    result = left.copy()
+    result.update(right)
+    return result
+
+def merge_lists(left: List[str], right: List[str]) -> List[str]:
+    """Custom reducer for merging lists in concurrent updates."""
+    return left + right
 
 
 # =========================
@@ -108,11 +122,11 @@ PLAN_ENDPOINT = "databricks-gpt-oss-20b"
 HTML_ENDPOINT = "databricks-claude-sonnet-4"
 
 # Parallel Processing Configuration
-MAX_WORKERS = 5  # Maximum number of concurrent slide generations
+DEFAULT_MAX_CONCURRENCY = 5  # Default max concurrent slide generations
 
 
 # =========================
-# Progress Tracking
+# Progress Tracking (Enhanced for Fan-out)
 # =========================
 class ProgressUpdate(BaseModel):
     """Progress update for streaming updates."""
@@ -124,9 +138,10 @@ class ProgressUpdate(BaseModel):
     elapsed_time: float = 0.0
     current_slide_title: str = ""
     error: Optional[str] = None
+    branch_id: Optional[str] = None  # For tracking parallel branches
 
-class ProgressTracker:
-    """Tracks progress of slide generation and sends updates via callback."""
+class FanOutProgressTracker:
+    """Enhanced progress tracker for fan-out architecture."""
     
     def __init__(self, session_id: str, callback_func: Optional[callable] = None):
         self.session_id = session_id
@@ -138,12 +153,16 @@ class ProgressTracker:
         self.total_slides = 0
         self.current_slide_title = ""
         self.last_update_time = 0
-        self.pending_updates = []  # Store multiple pending updates
-        self._lock = threading.Lock()  # Thread safety
+        self.pending_updates = []
+        self._lock = threading.Lock()
+        
+        # Fan-out specific tracking
+        self.branch_progress = {}  # branch_id -> progress info
+        self.completed_branches = set()
         
     def update_progress(self, step: str, percent: int, details: str = "", 
                        slides_completed: int = None, total_slides: int = None,
-                       current_slide_title: str = "", error: str = None):
+                       current_slide_title: str = "", error: str = None, branch_id: str = None):
         """Update progress and send callback if available."""
         self.current_step = step
         self.progress_percent = percent
@@ -164,15 +183,20 @@ class ProgressTracker:
             total_slides=self.total_slides,
             elapsed_time=elapsed_time,
             current_slide_title=current_slide_title,
-            error=error
+            error=error,
+            branch_id=branch_id
         )
+        
+        # Track branch progress for fan-out
+        if branch_id:
+            self.branch_progress[branch_id] = update
         
         # For async callbacks, always store updates (no throttling)
         import asyncio
         if self.callback_func and asyncio.iscoroutinefunction(self.callback_func):
             with self._lock:
                 self.pending_updates.append(update)
-                print(f"[PROGRESS] Stored pending update: {step} ({percent}%)")
+                print(f"[PROGRESS] Stored pending update: {step} ({percent}%) - Branch: {branch_id}")
         elif self.callback_func and (time.time() - self.last_update_time > 1.0 or error):
             # For sync callbacks, throttle updates
             try:
@@ -186,16 +210,20 @@ class ProgressTracker:
         self.total_slides = total
         print(f"[PROGRESS] Set total slides to {total}")
     
-    def complete_slide(self, slide_title: str):
+    def complete_slide(self, slide_title: str, branch_id: str = None):
         """Mark a slide as completed."""
         self.slides_completed += 1
+        if branch_id:
+            self.completed_branches.add(branch_id)
+        
         self.update_progress(
             step=f"Completed slide {self.slides_completed}/{self.total_slides}",
             percent=int((self.slides_completed / max(self.total_slides, 1)) * 80) + 10,  # 10-90% range
             details=f"Finished: {slide_title}",
-            current_slide_title=slide_title
+            current_slide_title=slide_title,
+            branch_id=branch_id
         )
-        print(f"[PROGRESS] Completed slide {self.slides_completed}/{self.total_slides}: {slide_title}")
+        print(f"[PROGRESS] Completed slide {self.slides_completed}/{self.total_slides}: {slide_title} (Branch: {branch_id})")
     
     def get_pending_updates(self):
         """Get and clear all pending updates."""
@@ -204,16 +232,13 @@ class ProgressTracker:
             self.pending_updates.clear()
             return updates
     
-    def get_pending_update(self):
-        """Get and clear the first pending update (for backward compatibility)."""
-        with self._lock:
-            if self.pending_updates:
-                return self.pending_updates.pop(0)
-            return None
+    def get_branch_progress(self, branch_id: str) -> Optional[ProgressUpdate]:
+        """Get progress for a specific branch."""
+        return self.branch_progress.get(branch_id)
 
 
 # =========================
-# Pydantic Models
+# Pydantic Models (Reused from original)
 # =========================
 class SlideTheme(BaseModel):
     """Theme configuration for slide decks."""
@@ -264,57 +289,11 @@ class SlideStatus(BaseModel):
     is_valid: bool = False
 
 
-@dataclass
-class SlideAdapter:
-    """Adapter to convert SlideStatus to Slide-like object for PPTX export.
-    
-    This bridges the new SlideDeckAgent architecture with the legacy
-    HtmlToPptxConverter which expects the old Slide format from html_slides.py.
-    
-    The HtmlToPptxConverter was designed for the old architecture where slides
-    had explicit types (title, agenda, content). In the new architecture, all
-    slides are custom HTML, so we default to slide_type="custom".
-    
-    Attributes:
-        slide_type: Type of slide (always "custom" for new architecture)
-        html: Complete HTML document for the slide
-        content: HTML content (same as html, for compatibility)
-        title: Slide title extracted from HTML or metadata
-        subtitle: Slide subtitle (empty for custom HTML slides)
-        bullets: List of bullet points (empty for custom HTML slides)
-        metadata: Additional metadata (empty dict for custom HTML slides)
-    """
-    slide_type: str = "custom"  # All new slides are custom HTML
-    html: str = ""
-    content: str = ""  # Same as html, for compatibility with HtmlToPptxConverter
-    title: str = ""
-    subtitle: str = ""  # Empty for custom HTML slides
-    bullets: List[str] = field(default_factory=list)
-    metadata: dict = field(default_factory=dict)  # Empty for custom HTML slides
-    
-    @classmethod
-    def from_slide_status(cls, status: SlideStatus) -> 'SlideAdapter':
-        """Create SlideAdapter from SlideStatus.
-        
-        Args:
-            status: SlideStatus object from SlideDeckAgent
-            
-        Returns:
-            SlideAdapter object compatible with HtmlToPptxConverter
-        """
-        return cls(
-            slide_type="custom",  # All slides are custom HTML in new architecture
-            html=status.html,
-            content=status.html,  # content and html are the same
-            title=status.title,
-            subtitle="",  # No separate subtitle in new architecture
-            bullets=[],  # Bullets are embedded in HTML, not separate
-            metadata={}  # No additional metadata
-        )
-
-
-class SlideDeckState(TypedDict):
-    """State for the slide deck generation agent."""
+# =========================
+# Fan-out State Management
+# =========================
+class FanOutSlideState(TypedDict):
+    """State for the fan-out slide generation agent."""
     # Core configuration
     config: SlideConfig
     config_version: int
@@ -335,11 +314,14 @@ class SlideDeckState(TypedDict):
     run_id: str
     
     # Progress tracking
-    progress_tracker: Optional[ProgressTracker]
+    progress_tracker: Optional[FanOutProgressTracker]
+    
+    # Fan-out specific - use Annotated for concurrent list updates
+    parallel_results: Annotated[List[Dict[str, Any]], add]  # Results from parallel branches
 
 
 # =========================
-# Utility Functions
+# Utility Functions (Reused from original)
 # =========================
 def _is_allowed_inline_script(tag: Tag) -> bool:
     """Check if an inline script is allowed."""
@@ -363,13 +345,7 @@ def _extract_text_from_response(content) -> str:
     return str(content)
 
 def _clean_markdown_fences(content: str) -> str:
-    """Remove markdown code fences from content.
-    
-    Handles various markdown fence formats:
-    - ```json ... ```
-    - ```html ... ```
-    - ``` ... ```
-    """
+    """Remove markdown code fences from content."""
     content = content.strip()
     
     # Remove opening fence
@@ -389,251 +365,8 @@ def _clean_markdown_fences(content: str) -> str:
 
 
 # =========================
-# Intent Parsing Helpers
+# Data Integration (Reused from original)
 # =========================
-def _extract_slide_id_from_message(message: str, default: int = 1) -> int:
-    """Extract slide ID from message using various patterns."""
-    patterns = [
-        r'(?:in\s+)?slide\s+(\d+)',   # "slide 1", "in slide 1"
-        r'for\s+slide\s+(\d+)',        # "for slide 2"
-        r'to\s+slide\s+(\d+)',         # "to slide 3"
-        r'on\s+slide\s+(\d+)',         # "on slide 4"
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, message, re.IGNORECASE)
-        if match:
-            return int(match.group(1))
-    
-    return default
-
-
-def _is_new_slide_indicator(message: str, slide_id: int) -> bool:
-    """Check if message contains indicators of new slide creation."""
-    message_lower = message.lower()
-    
-    # Strong indicators that this is a new slide, not an edit
-    new_slide_keywords = [
-        "title:",
-        "bullets:",
-        "new slide",
-        "add slide",
-        "add another slide",
-        "add a slide",
-        "create slide",
-        "create another slide",
-        "insert slide",
-        "make a slide",
-        "make another slide",
-        f"slide {slide_id} title:",
-        f"slide {slide_id} —",
-        f"slide {slide_id}:",
-    ]
-    
-    return any(keyword in message_lower for keyword in new_slide_keywords)
-
-
-def _parse_change_from_dict(changes_dict: dict) -> List[dict]:
-    """Parse changes from dict format: {"slide": N, "actions": [...]}."""
-    parsed = []
-    
-    if "slide" in changes_dict and "actions" in changes_dict:
-        slide_id = changes_dict["slide"]
-        actions = changes_dict["actions"]
-        if isinstance(actions, list):
-            for action in actions:
-                parsed.append({
-                    "slide_id": slide_id,
-                    "operation": "EDIT_RAW_HTML",
-                    "args": {"description": action}
-                })
-    
-    return parsed
-
-
-def _parse_change_from_list(changes_list: list) -> List[dict]:
-    """Parse changes from list format with various item types."""
-    parsed = []
-    
-    for item in changes_list:
-        # String format: convert to EDIT_RAW_HTML on slide 1
-        if isinstance(item, str):
-            parsed.append({
-                "slide_id": 1,
-                "operation": "EDIT_RAW_HTML",
-                "args": {"description": item}
-            })
-        
-        # Dict format: multiple sub-formats
-        elif isinstance(item, dict):
-            # {"slide_number": N, "description": "..."}
-            if "slide_number" in item and "description" in item:
-                parsed.append({
-                    "slide_id": item["slide_number"],
-                    "operation": "EDIT_RAW_HTML",
-                    "args": {"description": item["description"]}
-                })
-            
-            # {"slide_id": N, "operation": "...", "args": {...}}
-            elif "slide_id" in item and "operation" in item:
-                parsed.append(item)
-    
-    return parsed
-
-
-def _create_fallback_change(message: str, slide_id: int, is_new_slide: bool) -> dict:
-    """Create a fallback change when LLM doesn't provide structured changes."""
-    if is_new_slide:
-        return {
-            "slide_id": slide_id,
-            "operation": "INSERT_SLIDE_AFTER",
-            "args": {
-                "title": f"Slide {slide_id}",
-                "content": message,
-                "bullets": []
-            }
-        }
-    else:
-        return {
-            "slide_id": slide_id,
-            "operation": "EDIT_RAW_HTML",
-            "args": {"description": message}
-        }
-
-
-def _update_change_with_slide_id(change: dict, target_slide_id: int, message: str) -> None:
-    """Update a change dict with correct slide ID and operation in-place."""
-    if change.get("operation") != "EDIT_RAW_HTML":
-        return
-    
-    # Check if this is actually a new slide request
-    if _is_new_slide_indicator(message, target_slide_id):
-        change["operation"] = "INSERT_SLIDE_AFTER"
-        change["slide_id"] = target_slide_id
-        change["args"] = {
-            "title": f"Slide {target_slide_id}",
-            "content": message,
-            "bullets": []
-        }
-    else:
-        # Just update the slide ID for editing
-        change["slide_id"] = target_slide_id
-
-
-def _generate_single_slide(todo: SlideTodo, style_hint: str, space_id: str, progress_tracker=None) -> tuple[int, str, Optional[str]]:
-    """
-    Generate a single slide (used for parallel processing).
-    
-    Returns:
-        tuple: (slide_id, html_content, error_message)
-    """
-    try:
-        print(f"[PARALLEL] Generating slide {todo.id}: {todo.title}")
-        print(f"[PARALLEL] Progress tracker received: {progress_tracker}")
-        print(f"[PARALLEL] Progress tracker type: {type(progress_tracker)}")
-        if progress_tracker:
-            print(f"[PARALLEL] Progress tracker has update_progress: {hasattr(progress_tracker, 'update_progress')}")
-            print(f"[PARALLEL] Progress tracker has get_pending_updates: {hasattr(progress_tracker, 'get_pending_updates')}")
-        
-        # Get stream writer for real-time updates
-        try:
-            writer = get_stream_writer()
-            if writer:
-                writer(f"Starting generation of slide: {todo.title}")
-                print(f"[PARALLEL] Stream writer: Starting generation of slide: {todo.title}")
-        except Exception as e:
-            writer = None
-            print(f"[PARALLEL] Stream writer failed: {e}")
-        
-        # Check if data is needed and send Genie query progress update
-        print(f"[PARALLEL] Detecting data need for slide: {todo.title}")
-        data_query = _detect_data_need(todo.title, todo.details)
-        print(f"[PARALLEL] Data query result: {data_query}")
-        if data_query:
-            if writer:
-                writer(f"Querying Genie for slide: {todo.title}")
-                writer(f"Fetching data: {data_query[:50]}...")
-            elif progress_tracker:
-                print(f"[PARALLEL] Progress tracker exists, updating progress for Genie query")
-                print(f"[PARALLEL] Progress tracker type: {type(progress_tracker)}")
-                print(f"[PARALLEL] Progress tracker has update_progress: {hasattr(progress_tracker, 'update_progress')}")
-                try:
-                    progress_tracker.update_progress(
-                        step=f"Querying Genie for slide: {todo.title}",
-                        percent=progress_tracker.progress_percent,  # Keep current progress
-                        details=f"Fetching data: {data_query[:50]}...",
-                        current_slide_title=todo.title
-                    )
-                    print(f"[PARALLEL] Successfully updated progress tracker for Genie query")
-                except Exception as e:
-                    print(f"[PARALLEL] Error updating progress tracker for Genie query: {e}")
-            else:
-                print(f"[PARALLEL] No progress tracker available for Genie query")
-            print(f"[PARALLEL] Genie query: {data_query[:50]}...")
-        
-        # Generate HTML with automatic data fetching
-        raw_html = generate_slide_html.invoke({
-            "title": todo.title,
-            "outline": todo.details,
-            "style_hint": style_hint,
-            "space_id": space_id
-        })
-        
-        # Validate and repair if needed
-        if not validate_slide_html.invoke({"html": raw_html}):
-            print(f"[PARALLEL] Slide {todo.id} failed validation, attempting repair")
-            if writer:
-                writer(f"Repairing slide: {todo.title}")
-            raw_html = apply_slide_change.invoke({
-                "slide_html": raw_html,
-                "change": SlideChange(operation="EDIT_RAW_HTML", args={"fix": "structure"}),
-                "style_hint": style_hint
-            })
-        
-        # Sanitize
-        sanitized_html = sanitize_slide_html.invoke({"html": raw_html})
-        
-        # Send completion update
-        if writer:
-            writer(f"Completed slide: {todo.title}")
-        elif progress_tracker:
-            print(f"[PARALLEL] Progress tracker exists, updating completion for slide: {todo.title}")
-            try:
-                progress_tracker.complete_slide(todo.title)
-                print(f"[PARALLEL] Successfully updated progress tracker for completion")
-            except Exception as e:
-                print(f"[PARALLEL] Error updating progress tracker for completion: {e}")
-        else:
-            print(f"[PARALLEL] No progress tracker available for completion")
-        print(f"[PARALLEL] Completed slide: {todo.title}")
-        
-        print(f"[PARALLEL] Slide {todo.id} generated successfully")
-        return (todo.id, sanitized_html, None)
-        
-    except Exception as e:
-        error_msg = f"Generation error for slide {todo.id}: {str(e)}"
-        print(f"[PARALLEL] Error generating slide {todo.id}: {e}")
-        
-        # Create placeholder slide
-        placeholder_html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{todo.title}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-<body style="width: 1280px; height: 720px; margin: 0; padding: 0; overflow: hidden; background: white;">
-    <div style="max-width: 1280px; max-height: 720px; margin: 0 auto; padding: 32px; box-sizing: border-box;">
-        <h1 style="color: #102025; font-size: 48px; font-weight: bold; margin-bottom: 24px;">{todo.title}</h1>
-        <p style="color: #5D6D71; font-size: 18px;">Error generating slide content. Please try again.</p>
-    </div>
-</body>
-</html>"""
-        
-        return (todo.id, placeholder_html, error_msg)
-
 def query_genie_space(question: str, space_id: str = "01effebcc2781b6bbb749077a55d31e3", workspace_client: WorkspaceClient = ws) -> str:
     """Query Genie space for data and return as JSON."""
     try:
@@ -663,7 +396,6 @@ def query_genie_space(question: str, space_id: str = "01effebcc2781b6bbb749077a5
     except Exception as e:
         print(f"[GENIE] Error querying Genie space: {e}")
         return "[]"
-
 
 def _detect_data_need(title: str, outline: str) -> Optional[str]:
     """Use LLM to detect if slide needs data and construct an optimized Genie query."""
@@ -734,7 +466,7 @@ def _detect_data_need(title: str, outline: str) -> Optional[str]:
 
 
 # =========================
-# LangGraph Tools
+# LangGraph Tools (Reused from original)
 # =========================
 @tool("interpret_user_intent", return_direct=False)
 def interpret_user_intent(messages: List[Dict[str, str]], current_config: SlideConfig) -> UserIntent:
@@ -811,9 +543,9 @@ def interpret_user_intent(messages: List[Dict[str, str]], current_config: SlideC
     user = f"""Messages (recent last):
             {json.dumps(messages[-12:], ensure_ascii=False, indent=2)}
 
-Current config: {current_config.model_dump()}
-Has existing slides: {has_existing_slides}
-Current number of slides (current_n_slides): {current_n_slides}
+            Current config: {current_config.model_dump()}
+            Has existing slides: {has_existing_slides}
+            Current number of slides (current_n_slides): {current_n_slides}
 
             CRITICAL INSTRUCTIONS:
             1. ONLY extract intent and changes from the LAST (most recent) user message
@@ -988,22 +720,22 @@ def generate_slide_html(title: str, outline: str, style_hint: str, space_id: Opt
     sys = "Create a complete HTML document for a single slide." + HTML_CONSTRAINTS
     
     user = f"""TITLE: {title}
-OUTLINE: {outline}
-STYLE: {style_hint}
+                OUTLINE: {outline}
+                STYLE: {style_hint}
 
-CRITICAL INSTRUCTIONS:
-- Use ONLY the content provided above - do not add, modify, or hallucinate any data
-- If specific metrics, numbers, or data points are provided, use them exactly as given
-- If DATA section is provided above, use that ACTUAL data - do not create fictional data
-- If bullet points are specified, include them exactly as listed
-- If section headings are provided, use them exactly as specified
-- If company names, logos, or branding are mentioned, include them as specified
-- Do not create fictional data, statistics, or content not explicitly provided
-- Maintain the exact structure and content hierarchy as specified in the outline
-- Use Tailwind CSS with the brand colors and styling specified in the constraints
-- If data is provided, visualize it using Chart.js with appropriate chart type
+                CRITICAL INSTRUCTIONS:
+                - Use ONLY the content provided above - do not add, modify, or hallucinate any data
+                - If specific metrics, numbers, or data points are provided, use them exactly as given
+                - If DATA section is provided above, use that ACTUAL data - do not create fictional data
+                - If bullet points are specified, include them exactly as listed
+                - If section headings are provided, use them exactly as specified
+                - If company names, logos, or branding are mentioned, include them as specified
+                - Do not create fictional data, statistics, or content not explicitly provided
+                - Maintain the exact structure and content hierarchy as specified in the outline
+                - Use Tailwind CSS with the brand colors and styling specified in the constraints
+                - If data is provided, visualize it using Chart.js with appropriate chart type
 
-Create a beautiful, modern slide using Tailwind CSS with the exact brand colors and spacing specified. Ensure all content fits within 1280x720 pixels with proper contrast and visibility. Use white background and symmetrical layout. IMPORTANT: Use Navy 900 (#102025) for the main title, NOT gray colors."""
+                Create a beautiful, modern slide using Tailwind CSS with the exact brand colors and spacing specified. Ensure all content fits within 1280x720 pixels with proper contrast and visibility. Use white background and symmetrical layout. IMPORTANT: Use Navy 900 (#102025) for the main title, NOT gray colors."""
     
     response = model_serving_client.chat.completions.create(
         model=HTML_ENDPOINT,
@@ -1089,22 +821,22 @@ def apply_slide_change(slide_html: str, change: SlideChange, style_hint: str) ->
     """Apply a change to a slide using LLM."""
     sys = "Apply a slide change while maintaining beautiful Tailwind CSS design." + HTML_CONSTRAINTS
     user = f"""CURRENT SLIDE:
-{slide_html}
+            {slide_html}
 
-CHANGE: {change.model_dump_json()}
-STYLE: {style_hint}
+            CHANGE: {change.model_dump_json()}
+            STYLE: {style_hint}
 
-CRITICAL INSTRUCTIONS:
-- Apply ONLY the specific change requested - do not add, modify, or hallucinate any data
-- If the change specifies exact content, use it exactly as provided
-- If metrics, numbers, or data points are specified, use them exactly as given
-- If bullet points are specified, include them exactly as listed
-- If section headings are provided, use them exactly as specified
-- Do not create fictional data, statistics, or content not explicitly provided
-- Maintain the exact structure and content hierarchy as specified in the change
-- Use Tailwind CSS with the brand colors and styling specified in the constraints
+            CRITICAL INSTRUCTIONS:
+            - Apply ONLY the specific change requested - do not add, modify, or hallucinate any data
+            - If the change specifies exact content, use it exactly as provided
+            - If metrics, numbers, or data points are specified, use them exactly as given
+            - If bullet points are specified, include them exactly as listed
+            - If section headings are provided, use them exactly as specified
+            - Do not create fictional data, statistics, or content not explicitly provided
+            - Maintain the exact structure and content hierarchy as specified in the change
+            - Use Tailwind CSS with the brand colors and styling specified in the constraints
 
-Apply the change while keeping the modern Tailwind CSS styling and design."""
+            Apply the change while keeping the modern Tailwind CSS styling and design."""
     
     response = model_serving_client.chat.completions.create(
         model=HTML_ENDPOINT,
@@ -1119,9 +851,136 @@ Apply the change while keeping the modern Tailwind CSS styling and design."""
 
 
 # =========================
-# LangGraph Nodes
+# Helper Functions (Reused from original)
 # =========================
-def nlu_node(state: SlideDeckState) -> SlideDeckState:
+def _extract_slide_id_from_message(message: str, default: int = 1) -> int:
+    """Extract slide ID from message using various patterns."""
+    patterns = [
+        r'(?:in\s+)?slide\s+(\d+)',   # "slide 1", "in slide 1"
+        r'for\s+slide\s+(\d+)',        # "for slide 2"
+        r'to\s+slide\s+(\d+)',         # "to slide 3"
+        r'on\s+slide\s+(\d+)',         # "on slide 4"
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, message, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    
+    return default
+
+def _is_new_slide_indicator(message: str, slide_id: int) -> bool:
+    """Check if message contains indicators of new slide creation."""
+    message_lower = message.lower()
+    
+    # Strong indicators that this is a new slide, not an edit
+    new_slide_keywords = [
+        "title:",
+        "bullets:",
+        "new slide",
+        "add slide",
+        "add another slide",
+        "add a slide",
+        "create slide",
+        "create another slide",
+        "insert slide",
+        "make a slide",
+        "make another slide",
+        f"slide {slide_id} title:",
+        f"slide {slide_id} —",
+        f"slide {slide_id}:",
+    ]
+    
+    return any(keyword in message_lower for keyword in new_slide_keywords)
+
+def _parse_change_from_dict(changes_dict: dict) -> List[dict]:
+    """Parse changes from dict format: {"slide": N, "actions": [...]}."""
+    parsed = []
+    
+    if "slide" in changes_dict and "actions" in changes_dict:
+        slide_id = changes_dict["slide"]
+        actions = changes_dict["actions"]
+        if isinstance(actions, list):
+            for action in actions:
+                parsed.append({
+                    "slide_id": slide_id,
+                    "operation": "EDIT_RAW_HTML",
+                    "args": {"description": action}
+                })
+    
+    return parsed
+
+def _parse_change_from_list(changes_list: list) -> List[dict]:
+    """Parse changes from list format with various item types."""
+    parsed = []
+    
+    for item in changes_list:
+        # String format: convert to EDIT_RAW_HTML on slide 1
+        if isinstance(item, str):
+            parsed.append({
+                "slide_id": 1,
+                "operation": "EDIT_RAW_HTML",
+                "args": {"description": item}
+            })
+        
+        # Dict format: multiple sub-formats
+        elif isinstance(item, dict):
+            # {"slide_number": N, "description": "..."}
+            if "slide_number" in item and "description" in item:
+                parsed.append({
+                    "slide_id": item["slide_number"],
+                    "operation": "EDIT_RAW_HTML",
+                    "args": {"description": item["description"]}
+                })
+            
+            # {"slide_id": N, "operation": "...", "args": {...}}
+            elif "slide_id" in item and "operation" in item:
+                parsed.append(item)
+    
+    return parsed
+
+def _create_fallback_change(message: str, slide_id: int, is_new_slide: bool) -> dict:
+    """Create a fallback change when LLM doesn't provide structured changes."""
+    if is_new_slide:
+        return {
+            "slide_id": slide_id,
+            "operation": "INSERT_SLIDE_AFTER",
+            "args": {
+                "title": f"Slide {slide_id}",
+                "content": message,
+                "bullets": []
+            }
+        }
+    else:
+        return {
+            "slide_id": slide_id,
+            "operation": "EDIT_RAW_HTML",
+            "args": {"description": message}
+        }
+
+def _update_change_with_slide_id(change: dict, target_slide_id: int, message: str) -> None:
+    """Update a change dict with correct slide ID and operation in-place."""
+    if change.get("operation") != "EDIT_RAW_HTML":
+        return
+    
+    # Check if this is actually a new slide request
+    if _is_new_slide_indicator(message, target_slide_id):
+        change["operation"] = "INSERT_SLIDE_AFTER"
+        change["slide_id"] = target_slide_id
+        change["args"] = {
+            "title": f"Slide {target_slide_id}",
+            "content": message,
+            "bullets": []
+        }
+    else:
+        # Just update the slide ID for editing
+        change["slide_id"] = target_slide_id
+
+
+# =========================
+# Fan-out LangGraph Nodes
+# =========================
+def nlu_node(state: FanOutSlideState) -> FanOutSlideState:
     """Natural Language Understanding node - interprets user intent."""
     last_message = state['messages'][-1]['content'] if state['messages'] else ""
     print(f"[NLU] Processing last message: '{last_message[:80]}...'") if len(last_message) > 80 else print(f"[NLU] Processing last message: '{last_message}'")
@@ -1166,7 +1025,7 @@ def nlu_node(state: SlideDeckState) -> SlideDeckState:
     
     return state
 
-def planning_node(state: SlideDeckState) -> SlideDeckState:
+def planning_node(state: FanOutSlideState) -> FanOutSlideState:
     """Planning node - creates todos for slide generation."""
     print(f"[PLANNING] Creating todos for topic: {state['config'].topic}")
     
@@ -1221,9 +1080,9 @@ def planning_node(state: SlideDeckState) -> SlideDeckState:
     
     return state
 
-async def generation_node_async(state: SlideDeckState) -> SlideDeckState:
-    """Async generation node - generates HTML for slides with real-time progress updates."""
-    print(f"[GENERATION] Generating slides")
+def fan_out_generation(state: FanOutSlideState) -> Command:
+    """Fan-out node: creates parallel slide generation tasks using Send/Command."""
+    print(f"[FAN-OUT] Starting fan-out generation")
     
     slide_todos = [t for t in state["todos"] if t.action == "WRITE_SLIDE"]
     
@@ -1231,269 +1090,373 @@ async def generation_node_async(state: SlideDeckState) -> SlideDeckState:
     todos_to_generate = [t for t in slide_todos if t.id not in state["artifacts"]]
     
     if not todos_to_generate:
-        print(f"[GENERATION] All slides already generated")
-        return state
+        print(f"[FAN-OUT] All slides already generated")
+        return Command(goto="join_results")
     
     # Get progress tracker from state if available
     progress_tracker = state.get("progress_tracker")
     
-    print(f"[GENERATION] Generating {len(todos_to_generate)} slides in parallel (max {MAX_WORKERS} workers)")
-    start_time = time.time()
+    print(f"[FAN-OUT] Fanning out {len(todos_to_generate)} slides for parallel generation")
     
     # Update progress for generation start
     if progress_tracker:
         progress_tracker.update_progress(
-            step="Generating slides",
+            step="Starting parallel generation",
             percent=20,
-            details=f"Starting generation of {len(todos_to_generate)} slides"
+            details=f"Fanning out {len(todos_to_generate)} slides for parallel processing"
         )
     
-    style_hint = state["config"].style_hint or "professional clean"
-    space_id = "01effebcc2781b6bbb749077a55d31e3"
+    # Create Send commands for each slide
+    sends = []
+    for todo in todos_to_generate:
+        # Create isolated state slice for each parallel branch
+        branch_state = {
+            "todo": todo,
+            "config": state["config"],
+            "progress_tracker": progress_tracker,
+            "branch_id": f"slide_{todo.id}"
+        }
+        sends.append(Send("generate_slide", branch_state))
     
-    # Use ThreadPoolExecutor for parallel generation
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # Submit all slide generation tasks
-        future_to_todo = {
-            executor.submit(_generate_single_slide, todo, style_hint, space_id, progress_tracker): todo
-            for todo in todos_to_generate
+    print(f"[FAN-OUT] Created {len(sends)} parallel branches")
+    return Command(goto=sends)
+
+def generate_slide(state: FanOutSlideState) -> Command:
+    """Worker node: generates a single slide with parallel Genie calls."""
+    todo = state["todo"]
+    branch_id = state.get("branch_id", f"slide_{todo.id}")
+    progress_tracker = state.get("progress_tracker")
+    
+    print(f"[GENERATE_SLIDE] Generating slide {todo.id}: {todo.title} (Branch: {branch_id})")
+    
+    try:
+        # Get stream writer for real-time updates
+        try:
+            writer = get_stream_writer()
+            if writer:
+                writer(f"Starting generation of slide: {todo.title}")
+                print(f"[GENERATE_SLIDE] Stream writer: Starting generation of slide: {todo.title}")
+        except Exception as e:
+            writer = None
+            print(f"[GENERATE_SLIDE] Stream writer failed: {e}")
+        
+        # Check if data is needed and create parallel Genie calls
+        print(f"[GENERATE_SLIDE] Detecting data need for slide: {todo.title}")
+        data_query = _detect_data_need(todo.title, todo.details)
+        print(f"[GENERATE_SLIDE] Data query result: {data_query}")
+        
+        if data_query:
+            # Create parallel Genie calls using Send/Command
+            print(f"[GENERATE_SLIDE] Creating parallel Genie calls for slide: {todo.title}")
+            
+            # Create state for Genie query
+            genie_state = {
+                "todo": todo,
+                "data_query": data_query,
+                "config": state["config"],
+                "progress_tracker": progress_tracker,
+                "branch_id": branch_id,
+                "writer": writer
+            }
+            
+            # Send to Genie query node
+            return Command(goto=[Send("query_genie", genie_state)])
+        else:
+            # No data needed, proceed directly to HTML generation
+            print(f"[GENERATE_SLIDE] No data needed, proceeding to HTML generation")
+            
+            # Create state for HTML generation
+            html_state = {
+                "todo": todo,
+                "config": state["config"],
+                "progress_tracker": progress_tracker,
+                "branch_id": branch_id,
+                "writer": writer,
+                "genie_data": None  # No data from Genie
+            }
+            
+            return Command(goto=[Send("generate_html", html_state)])
+        
+    except Exception as e:
+        error_msg = f"Generation error for slide {todo.id}: {str(e)}"
+        print(f"[GENERATE_SLIDE] Error generating slide {todo.id}: {e}")
+        
+        # Return error result
+        return Command(goto=[Send("handle_generation_error", {
+            "todo": todo,
+            "error": error_msg,
+            "branch_id": branch_id
+        })])
+
+def query_genie(state: FanOutSlideState) -> Command:
+    """Query Genie for data needed by a slide."""
+    todo = state["todo"]
+    data_query = state["data_query"]
+    branch_id = state.get("branch_id", f"slide_{todo.id}")
+    progress_tracker = state.get("progress_tracker")
+    writer = state.get("writer")
+    
+    print(f"[QUERY_GENIE] Querying Genie for slide {todo.id}: {data_query[:50]}...")
+    
+    try:
+        # Send progress update
+        if writer:
+            writer(f"Querying Genie for slide: {todo.title}")
+            writer(f"Fetching data: {data_query[:50]}...")
+        elif progress_tracker:
+            progress_tracker.update_progress(
+                step=f"Querying Genie for slide: {todo.title}",
+                percent=progress_tracker.progress_percent,
+                details=f"Fetching data: {data_query[:50]}...",
+                current_slide_title=todo.title,
+                branch_id=branch_id
+            )
+        
+        # Query Genie
+        genie_data = query_genie_space(data_query, "01effebcc2781b6bbb749077a55d31e3")
+        
+        print(f"[QUERY_GENIE] Genie query completed for slide {todo.id}")
+        
+        # Proceed to HTML generation with Genie data
+        html_state = {
+            "todo": todo,
+            "config": state["config"],
+            "progress_tracker": progress_tracker,
+            "branch_id": branch_id,
+            "writer": writer,
+            "genie_data": genie_data
         }
         
-        # Track completed slides for progress updates
-        completed_count = 0
+        return Command(goto=[Send("generate_html", html_state)])
         
-        # Collect results as they complete
-        for future in as_completed(future_to_todo):
-            todo = future_to_todo[future]
-            try:
-                slide_id, html_content, error_msg = future.result()
-                
-                # Store the generated slide
-                state["artifacts"][slide_id] = html_content
-                completed_count += 1
-                
-                # Update progress for each completed slide with more frequent updates
-                if progress_tracker:
-                    progress_tracker.complete_slide(todo.title)
-                    # Force a progress update to be sent immediately
-                    progress_tracker.update_progress(
-                        step=f"Completed slide {completed_count}/{len(todos_to_generate)}",
-                        percent=int((completed_count / len(todos_to_generate)) * 80) + 10,
-                        details=f"Finished: {todo.title}",
-                        current_slide_title=todo.title
-                    )
-                
-                # Log any errors
-                if error_msg:
-                    state["errors"].append(error_msg)
-                    if progress_tracker:
-                        progress_tracker.update_progress(
-                            step=f"Slide {completed_count}/{len(todos_to_generate)} completed with warnings",
-                            percent=int((completed_count / len(todos_to_generate)) * 80) + 10,
-                            details=f"Completed: {todo.title} (with warnings)",
-                            current_slide_title=todo.title
-                        )
-                
-            except Exception as e:
-                error_msg = f"Unexpected error for slide {todo.id}: {str(e)}"
-                print(f"[GENERATION] {error_msg}")
-                state["errors"].append(error_msg)
-                completed_count += 1
-                
-                # Update progress for failed slide
-                if progress_tracker:
-                    progress_tracker.update_progress(
-                        step=f"Slide {completed_count}/{len(todos_to_generate)} failed",
-                        percent=int((completed_count / len(todos_to_generate)) * 80) + 10,
-                        details=f"Failed: {todo.title} - {str(e)}",
-                        current_slide_title=todo.title,
-                        error=str(e)
-                    )
-                
+    except Exception as e:
+        error_msg = f"Genie query error for slide {todo.id}: {str(e)}"
+        print(f"[QUERY_GENIE] Error querying Genie for slide {todo.id}: {e}")
+        
+        # Proceed to HTML generation without Genie data
+        html_state = {
+            "todo": todo,
+            "config": state["config"],
+            "progress_tracker": progress_tracker,
+            "branch_id": branch_id,
+            "writer": writer,
+            "genie_data": None,
+            "genie_error": error_msg
+        }
+        
+        return Command(goto=[Send("generate_html", html_state)])
+
+def generate_html(state: FanOutSlideState) -> Dict[str, Any]:
+    """Generate HTML for a slide with optional Genie data."""
+    todo = state["todo"]
+    branch_id = state.get("branch_id", f"slide_{todo.id}")
+    progress_tracker = state.get("progress_tracker")
+    writer = state.get("writer")
+    genie_data = state.get("genie_data")
+    genie_error = state.get("genie_error")
+    
+    print(f"[GENERATE_HTML] Generating HTML for slide {todo.id}: {todo.title}")
+    
+    try:
+        # Prepare generation parameters
+        generation_params = {
+            "title": todo.title,
+            "outline": todo.details,
+            "style_hint": state["config"].style_hint or "professional clean",
+            "space_id": "01effebcc2781b6bbb749077a55d31e3"
+        }
+        
+        # Add Genie data if available
+        if genie_data:
+            generation_params["genie_data"] = genie_data
+            print(f"[GENERATE_HTML] Using Genie data for slide {todo.id}")
+        elif genie_error:
+            print(f"[GENERATE_HTML] Genie query failed for slide {todo.id}: {genie_error}")
+        
+        # Generate HTML
+        raw_html = generate_slide_html.invoke(generation_params)
+        
+        # Validate and repair if needed
+        if not validate_slide_html.invoke({"html": raw_html}):
+            print(f"[GENERATE_HTML] Slide {todo.id} failed validation, attempting repair")
+            if writer:
+                writer(f"Repairing slide: {todo.title}")
+            raw_html = apply_slide_change.invoke({
+                "slide_html": raw_html,
+                "change": SlideChange(operation="EDIT_RAW_HTML", args={"fix": "structure"}),
+                "style_hint": state["config"].style_hint or "professional clean"
+            })
+        
+        # Sanitize
+        sanitized_html = sanitize_slide_html.invoke({"html": raw_html})
+        
+        # Send completion update
+        if writer:
+            writer(f"Completed slide: {todo.title}")
+        elif progress_tracker:
+            progress_tracker.complete_slide(todo.title, branch_id)
+        
+        print(f"[GENERATE_HTML] Slide {todo.id} generated successfully")
+        
+        # Return result for collection
+        return {
+            "parallel_results": [{
+                "slide_id": todo.id,
+                "html": sanitized_html,
+                "branch_id": branch_id,
+                "success": True,
+                "title": todo.title,
+                "genie_data_used": genie_data is not None
+            }]
+        }
+        
+    except Exception as e:
+        error_msg = f"HTML generation error for slide {todo.id}: {str(e)}"
+        print(f"[GENERATE_HTML] Error generating HTML for slide {todo.id}: {e}")
+        
+        # Create placeholder slide
+        placeholder_html = f"""<!DOCTYPE html>
+                                <html lang="en">
+                                <head>
+                                    <meta charset="UTF-8">
+                                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                    <title>{todo.title}</title>
+                                    <script src="https://cdn.tailwindcss.com"></script>
+                                    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+                                </head>
+                                <body style="width: 1280px; height: 720px; margin: 0; padding: 0; overflow: hidden; background: white;">
+                                    <div style="max-width: 1280px; max-height: 720px; margin: 0 auto; padding: 32px; box-sizing: border-box;">
+                                        <h1 style="color: #102025; font-size: 48px; font-weight: bold; margin-bottom: 24px;">{todo.title}</h1>
+                                        <p style="color: #5D6D71; font-size: 18px;">Error generating slide content. Please try again.</p>
+                                    </div>
+                                </body>
+                            </html>"""
+        
+        return {
+            "parallel_results": [{
+                "slide_id": todo.id,
+                "html": placeholder_html,
+                "branch_id": branch_id,
+                "success": False,
+                "title": todo.title,
+                "error": error_msg
+            }],
+            "errors": [error_msg]
+        }
+
+def handle_generation_error(state: FanOutSlideState) -> Dict[str, Any]:
+    """Handle generation errors."""
+    todo = state["todo"]
+    error = state["error"]
+    branch_id = state.get("branch_id", f"slide_{todo.id}")
+    
+    print(f"[HANDLE_ERROR] Handling error for slide {todo.id}: {error}")
+    
+    # Create placeholder slide
+    placeholder_html = f"""<!DOCTYPE html>
+                            <html lang="en">
+                            <head>
+                                <meta charset="UTF-8">
+                                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                <title>{todo.title}</title>
+                                <script src="https://cdn.tailwindcss.com"></script>
+                                <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+                            </head>
+                            <body style="width: 1280px; height: 720px; margin: 0; padding: 0; overflow: hidden; background: white;">
+                                <div style="max-width: 1280px; max-height: 720px; margin: 0 auto; padding: 32px; box-sizing: border-box;">
+                                    <h1 style="color: #102025; font-size: 48px; font-weight: bold; margin-bottom: 24px;">{todo.title}</h1>
+                                    <p style="color: #5D6D71; font-size: 18px;">Error generating slide content. Please try again.</p>
+                                </div>
+                            </body>
+                    </html>"""
+    
+    return {
+        "parallel_results": [{
+            "slide_id": todo.id,
+            "html": placeholder_html,
+            "branch_id": branch_id,
+            "success": False,
+            "title": todo.title,
+            "error": error
+        }],
+        "errors": [error]
+    }
+
+def join_results(state: FanOutSlideState) -> FanOutSlideState:
+    """Fan-in node: merges results from all parallel branches."""
+    print(f"[JOIN] 🔥 JOIN_RESULTS CALLED - Merging results from parallel branches")
+    
+    # Process results from parallel branches
+    parallel_results = state.get("parallel_results", [])
+    print(f"[JOIN] Processing {len(parallel_results)} parallel results")
+    
+    # Initialize artifacts if not present
+    if "artifacts" not in state:
+        state["artifacts"] = {}
+    
+    # Process each result
+    for result in parallel_results:
+        slide_id = result.get("slide_id")
+        html = result.get("html")
+        success = result.get("success", False)
+        title = result.get("title", f"Slide {slide_id}")
+        error = result.get("error")
+        
+        # Only add if not already present (avoid duplicates)
+        if slide_id not in state["artifacts"]:
+            if success and html:
+                state["artifacts"][slide_id] = html
+                print(f"[JOIN] ✅ Added slide {slide_id}: {title}")
+            else:
                 # Create placeholder for failed slide
                 placeholder_html = f"""<!DOCTYPE html>
                                         <html lang="en">
                                         <head>
                                             <meta charset="UTF-8">
                                             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                                            <title>{todo.title}</title>
+                                            <title>{title}</title>
                                             <script src="https://cdn.tailwindcss.com"></script>
                                             <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
                                         </head>
                                         <body style="width: 1280px; height: 720px; margin: 0; padding: 0; overflow: hidden; background: white;">
                                             <div style="max-width: 1280px; max-height: 720px; margin: 0 auto; padding: 32px; box-sizing: border-box;">
-                                                <h1 style="color: #102025; font-size: 48px; font-weight: bold; margin-bottom: 24px;">{todo.title}</h1>
+                                                <h1 style="color: #102025; font-size: 48px; font-weight: bold; margin-bottom: 24px;">{title}</h1>
                                                 <p style="color: #5D6D71; font-size: 18px;">Error generating slide content. Please try again.</p>
                                             </div>
                                         </body>
                                         </html>"""
-                state["artifacts"][todo.id] = placeholder_html
+                state["artifacts"][slide_id] = placeholder_html
+                print(f"[JOIN] ⚠️ Added placeholder for slide {slide_id}: {title}")
+                
+                if error:
+                    if "errors" not in state:
+                        state["errors"] = []
+                    state["errors"].append(error)
+        else:
+            print(f"[JOIN] ⏭️ Skipping duplicate slide {slide_id}: {title}")
     
-    end_time = time.time()
-    print(f"[GENERATION] Completed {len(todos_to_generate)} slides in {end_time - start_time:.2f}s")
+    # Clear parallel_results to prevent re-processing
+    state["parallel_results"] = []
     
-    # Final progress update
+    # Update progress for completion
+    progress_tracker = state.get("progress_tracker")
     if progress_tracker:
+        artifacts = state.get("artifacts", {})
+        completed_slides = len(artifacts)
         progress_tracker.update_progress(
             step="Generation complete",
             percent=90,
-            details=f"Successfully generated {len(todos_to_generate)} slides"
+            details=f"Successfully generated {completed_slides} slides"
         )
     
+    print(f"[JOIN] Merged results: {len(state.get('artifacts', {}))} slides generated")
     return state
 
-def generation_node(state: SlideDeckState) -> SlideDeckState:
-    """Generation node - generates HTML for slides using parallel processing."""
-    print(f"[GENERATION] Generating slides")
-    
-    slide_todos = [t for t in state["todos"] if t.action == "WRITE_SLIDE"]
-    
-    # Filter out slides that already exist
-    todos_to_generate = [t for t in slide_todos if t.id not in state["artifacts"]]
-    
-    if not todos_to_generate:
-        print(f"[GENERATION] All slides already generated")
-        return state
-    
-    # Get progress tracker from state if available
-    progress_tracker = state.get("progress_tracker")
-    print(f"[GENERATION] Progress tracker from state: {progress_tracker}")
-    print(f"[GENERATION] Progress tracker type: {type(progress_tracker)}")
-    if progress_tracker:
-        print(f"[GENERATION] Progress tracker has get_pending_updates: {hasattr(progress_tracker, 'get_pending_updates')}")
-    
-    # Get stream writer for real-time updates
-    try:
-        writer = get_stream_writer()
-        writer(f"Starting generation of {len(todos_to_generate)} slides")
-    except:
-        writer = None
-    
-    print(f"[GENERATION] Generating {len(todos_to_generate)} slides in parallel (max {MAX_WORKERS} workers)")
-    start_time = time.time()
-    
-    # Update progress for generation start
-    if progress_tracker:
-        progress_tracker.update_progress(
-            step="Generating slides",
-            percent=20,
-            details=f"Starting generation of {len(todos_to_generate)} slides"
-        )
-    
-    style_hint = state["config"].style_hint or "professional clean"
-    space_id = "01effebcc2781b6bbb749077a55d31e3"
-    
-    # Use ThreadPoolExecutor for parallel generation
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # Submit all slide generation tasks
-        future_to_todo = {
-            executor.submit(_generate_single_slide, todo, style_hint, space_id, progress_tracker): todo
-            for todo in todos_to_generate
-        }
-        
-        # Track completed slides for progress updates
-        completed_count = 0
-        
-        # Collect results as they complete
-        for future in as_completed(future_to_todo):
-            todo = future_to_todo[future]
-            try:
-                slide_id, html_content, error_msg = future.result()
-                
-                # Store the generated slide
-                state["artifacts"][slide_id] = html_content
-                completed_count += 1
-                
-                # Send completion update via stream writer
-                if writer:
-                    writer(f"Completed slide {completed_count}/{len(todos_to_generate)}: {todo.title}")
-                
-                # Update progress for each completed slide
-                if progress_tracker:
-                    progress_tracker.complete_slide(todo.title)
-                
-                # Log any errors
-                if error_msg:
-                    state["errors"].append(error_msg)
-                    if progress_tracker:
-                        progress_tracker.update_progress(
-                            step=f"Slide {completed_count}/{len(todos_to_generate)} completed with warnings",
-                            percent=int((completed_count / len(todos_to_generate)) * 80) + 10,
-                            details=f"Completed: {todo.title} (with warnings)",
-                            current_slide_title=todo.title
-                        )
-                    
-            except Exception as e:
-                error_msg = f"Unexpected error for slide {todo.id}: {str(e)}"
-                print(f"[GENERATION] {error_msg}")
-                state["errors"].append(error_msg)
-                completed_count += 1
-                
-                # Update progress for failed slide
-                if progress_tracker:
-                    progress_tracker.update_progress(
-                        step=f"Slide {completed_count}/{len(todos_to_generate)} failed",
-                        percent=int((completed_count / len(todos_to_generate)) * 80) + 10,
-                        details=f"Failed: {todo.title} - {str(e)}",
-                        current_slide_title=todo.title,
-                        error=str(e)
-                    )
-                
-                # Create placeholder for failed slide
-                placeholder_html = f"""<!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{todo.title}</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        </head>
-        <body style="width: 1280px; height: 720px; margin: 0; padding: 0; overflow: hidden; background: white;">
-            <div style="max-width: 1280px; max-height: 720px; margin: 0 auto; padding: 32px; box-sizing: border-box;">
-                <h1 style="color: #102025; font-size: 48px; font-weight: bold; margin-bottom: 24px;">{todo.title}</h1>
-                <p style="color: #5D6D71; font-size: 18px;">Error generating slide content. Please try again.</p>
-            </div>
-        </body>
-        </html>"""
-                state["artifacts"][todo.id] = placeholder_html
-    
-    elapsed_time = time.time() - start_time
-    print(f"[GENERATION] Completed {len(todos_to_generate)} slides in {elapsed_time:.2f}s (avg {elapsed_time/len(todos_to_generate):.2f}s per slide)")
-    
-    # Optimized todo management: Keep todos but mark as completed (immutably)
-    # Create new todo instances instead of mutating existing ones
-    remaining_todos = []
-    for todo in state["todos"]:
-        if todo.action == "WRITE_SLIDE":
-            # Create new todo instance with COMPLETED marker (don't mutate original)
-            if not todo.details.startswith("[COMPLETED]"):
-                new_todo = SlideTodo(
-                    id=todo.id,
-                    action=todo.action,
-                    title=todo.title,
-                    details=f"[COMPLETED] {todo.details}",
-                    depends_on=todo.depends_on
-                )
-                remaining_todos.append(new_todo)
-            else:
-                remaining_todos.append(todo)
-        else:
-            # Keep non-WRITE_SLIDE todos
-            remaining_todos.append(todo)
-    
-    state["todos"] = remaining_todos
-    print(f"[GENERATION] Processed {len(todos_to_generate)} slides, kept {len(remaining_todos)} todos for reference")
-    
-    return state
-
-def modification_node(state: SlideDeckState) -> SlideDeckState:
+def modification_node(state: FanOutSlideState) -> FanOutSlideState:
     """Modification node - applies changes to slides."""
     print(f"[MODIFICATION] Processing {len(state['pending_changes'])} changes")
     
     # Create a mapping of user-visible slide numbers to actual artifact IDs
-    # IMPORTANT: Use todo order (not sorted artifact keys) to preserve slide sequence
-    # This is critical after INSERT_SLIDE_AFTER operations which reorder todos
     slide_todos = [t for t in state["todos"] if t.action == "WRITE_SLIDE"]
     slide_number_to_id = {i+1: slide_todos[i].id for i in range(len(slide_todos))}
     print(f"[MODIFICATION] Slide mapping (based on todo order): {slide_number_to_id}")
@@ -1523,7 +1486,7 @@ def modification_node(state: SlideDeckState) -> SlideDeckState:
                 # Remove from artifacts
                 removed_artifact = state["artifacts"].pop(actual_id, None)
                 
-                # CRITICAL: Also remove from todos (this was missing!)
+                # Also remove from todos
                 slide_todos = [t for t in state["todos"] if t.action == "WRITE_SLIDE"]
                 other_todos = [t for t in state["todos"] if t.action != "WRITE_SLIDE"]
                 updated_slides = [t for t in slide_todos if t.id != actual_id]
@@ -1531,7 +1494,6 @@ def modification_node(state: SlideDeckState) -> SlideDeckState:
                 
                 if removed_artifact:
                     print(f"[MODIFICATION] ✅ Deleted slide {slide_id} (artifact ID {actual_id})")
-                    print(f"[MODIFICATION] After DELETE_SLIDE: Todo order now {[t.id for t in updated_slides]}")
                 else:
                     print(f"[MODIFICATION] ⚠️ Slide {slide_id} not found for deletion")
                 continue
@@ -1548,13 +1510,13 @@ def modification_node(state: SlideDeckState) -> SlideDeckState:
                 else:
                     outline = "\n".join(f"- {b}" for b in bullets)
                 
-                # Generate new slide with error handling (with automatic data fetching)
+                # Generate new slide with error handling
                 try:
                     new_html = generate_slide_html.invoke({
                         "title": title,
                         "outline": outline,
                         "style_hint": state["config"].style_hint or "professional clean",
-                        "space_id": "01effebcc2781b6bbb749077a55d31e3"  # Genie space ID
+                        "space_id": "01effebcc2781b6bbb749077a55d31e3"
                     })
                     
                     if not validate_slide_html.invoke({"html": new_html}):
@@ -1569,7 +1531,7 @@ def modification_node(state: SlideDeckState) -> SlideDeckState:
                     
                 except Exception as e:
                     print(f"[MODIFICATION] Error generating slide: {e}")
-                    # Create a placeholder slide with the user's content
+                    # Create a placeholder slide
                     new_id = max([t.id for t in state["todos"]], default=0) + 1
                     placeholder_html = f"""<!DOCTYPE html>
                                         <html lang="en">
@@ -1638,13 +1600,12 @@ def modification_node(state: SlideDeckState) -> SlideDeckState:
     state["pending_changes"] = []
     return state
 
-def status_node(state: SlideDeckState) -> SlideDeckState:
+def status_node(state: FanOutSlideState) -> FanOutSlideState:
     """Status node - updates slide status."""
     print(f"[STATUS] Updating slide status")
     
     status_list = []
-    # IMPORTANT: Use todo order to preserve slide sequence (not artifact dict order)
-    # This ensures slides are displayed in the correct order after INSERT_SLIDE_AFTER
+    # Use todo order to preserve slide sequence
     slide_todos = [t for t in state["todos"] if t.action == "WRITE_SLIDE"]
     print(f"[STATUS] Todo order: {[t.id for t in slide_todos]}")
     
@@ -1684,7 +1645,7 @@ def status_node(state: SlideDeckState) -> SlideDeckState:
 # =========================
 # Routing Functions
 # =========================
-def should_continue(state: SlideDeckState) -> str:
+def should_continue(state: FanOutSlideState) -> str:
     """Determine the next node based on current state."""
     intent = state.get("last_intent")
     
@@ -1699,7 +1660,7 @@ def should_continue(state: SlideDeckState) -> str:
             if not state.get("todos"):
                 return "planning"
             elif any(todo.id not in state.get("artifacts", {}) for todo in state.get("todos", []) if todo.action == "WRITE_SLIDE"):
-                return "generation"
+                return "fan_out_generation"
             else:
                 return "status"
         else:
@@ -1711,16 +1672,21 @@ def should_continue(state: SlideDeckState) -> str:
 # =========================
 # Graph Construction
 # =========================
-def create_slide_agent() -> StateGraph:
-    """Create the slide generation agent graph."""
+def create_fanout_slide_agent() -> StateGraph:
+    """Create the fan-out slide generation agent graph."""
     
     # Create the graph
-    graph = StateGraph(SlideDeckState)
+    graph = StateGraph(FanOutSlideState)
     
     # Add nodes
     graph.add_node("nlu", nlu_node)
     graph.add_node("planning", planning_node)
-    graph.add_node("generation", generation_node)
+    graph.add_node("fan_out_generation", fan_out_generation)
+    graph.add_node("generate_slide", generate_slide)
+    graph.add_node("query_genie", query_genie)
+    graph.add_node("generate_html", generate_html)
+    graph.add_node("handle_generation_error", handle_generation_error)
+    graph.add_node("join_results", join_results)
     graph.add_node("modification", modification_node)
     graph.add_node("status", status_node)
     
@@ -1737,15 +1703,21 @@ def create_slide_agent() -> StateGraph:
             "status": "status"
         }
     )
-    graph.add_edge("planning", "generation")
-    graph.add_edge("generation", "modification")
+    graph.add_edge("planning", "fan_out_generation")
+    # Note: fan_out_generation -> generate_slide is handled by Send commands
+    # Note: generate_slide -> query_genie/generate_html/handle_generation_error is handled by Send commands
+    # Note: query_genie -> generate_html is handled by Send commands
+    # Note: generate_html/handle_generation_error -> join_results is handled by Send commands
+    graph.add_edge("generate_html", "join_results")
+    graph.add_edge("handle_generation_error", "join_results")
+    graph.add_edge("join_results", "modification")
     graph.add_conditional_edges(
         "modification",
         should_continue,
         {
             "status": "status",
             "planning": "planning",
-            "generation": "generation",
+            "fan_out_generation": "fan_out_generation",
             "modification": "modification"
         }
     )
@@ -1757,16 +1729,16 @@ def create_slide_agent() -> StateGraph:
 # =========================
 # Main Agent Class
 # =========================
-class SlideDeckAgent:
-    """LangGraph-based slide deck generation agent."""
+class FanOutSlideDeckAgent:
+    """Fan-out based slide deck generation agent using LangGraph Send/Command."""
     
-    def __init__(self, theme: Optional[SlideTheme] = None, progress_tracker: Optional[ProgressTracker] = None):
+    def __init__(self, theme: Optional[SlideTheme] = None, progress_tracker: Optional[FanOutProgressTracker] = None):
         self.theme = theme or SlideTheme()
-        self.graph = create_slide_agent().compile()
+        self.graph = create_fanout_slide_agent().compile()
         self.progress_tracker = progress_tracker
         
         # Initialize state
-        self.initial_state: SlideDeckState = {
+        self.initial_state: FanOutSlideState = {
             "config": SlideConfig(),
             "config_version": 0,
             "messages": [],
@@ -1778,22 +1750,30 @@ class SlideDeckAgent:
             "errors": [],
             "metrics": {},
             "run_id": "",
-            "progress_tracker": progress_tracker
+            "progress_tracker": progress_tracker,
+            "parallel_results": []
         }
     
-    def process_message(self, message: str, run_id: str = None) -> Dict:
+    def process_message(self, message: str, run_id: str = None, max_concurrency: int = DEFAULT_MAX_CONCURRENCY) -> Dict:
         """Process a user message and return the result."""
         if run_id is None:
             run_id = f"run_{int(time.time())}"
         
-        # Add message to state (deep copy to prevent mutations affecting original state)
-        current_state = copy.deepcopy(self.initial_state)
+        # Add message to state (shallow copy to avoid threading lock issues)
+        current_state = self.initial_state.copy()
+        current_state["messages"] = self.initial_state["messages"].copy()
         current_state["messages"].append({"role": "user", "content": message})
         current_state["run_id"] = run_id
         
-        # Run the agent
+        # Run the agent with configurable concurrency
         try:
-            result = self.graph.invoke(current_state, config={"run_id": run_id})
+            result = self.graph.invoke(
+                current_state, 
+                config={
+                    "run_id": run_id,
+                    "max_concurrency": max_concurrency
+                }
+            )
             
             # Update the agent's state with the result
             self.initial_state = result
@@ -1813,7 +1793,7 @@ class SlideDeckAgent:
                 "errors": [str(e)]
             }
     
-    async def process_message_streaming_async(self, message: str, run_id: str = None) -> AsyncGenerator[Dict, None]:
+    async def process_message_streaming_async(self, message: str, run_id: str = None, max_concurrency: int = DEFAULT_MAX_CONCURRENCY) -> AsyncGenerator[Dict, None]:
         """Process a user message with real-time streaming using LangGraph's astream method."""
         if run_id is None:
             run_id = f"run_{int(time.time())}"
@@ -1826,8 +1806,9 @@ class SlideDeckAgent:
                 details="Analyzing request and initializing..."
             )
         
-        # Add message to state (deep copy to prevent mutations affecting original state)
-        current_state = copy.deepcopy(self.initial_state)
+        # Add message to state (shallow copy to avoid threading lock issues)
+        current_state = self.initial_state.copy()
+        current_state["messages"] = self.initial_state["messages"].copy()
         current_state["messages"].append({"role": "user", "content": message})
         current_state["run_id"] = run_id
         current_state["progress_tracker"] = self.progress_tracker
@@ -1835,13 +1816,26 @@ class SlideDeckAgent:
         try:
             # Use LangGraph's streaming capability
             final_state = current_state
-            async for chunk in self.graph.astream(current_state, config={"run_id": run_id}, stream_mode="updates"):
+            async for chunk in self.graph.astream(
+                current_state, 
+                config={
+                    "run_id": run_id,
+                    "max_concurrency": max_concurrency
+                }, 
+                stream_mode="updates"
+            ):
+                # Handle None or invalid chunks
+                if chunk is None or not isinstance(chunk, dict):
+                    print(f"[STREAM] Skipping invalid chunk: {chunk}")
+                    continue
+                
                 # Extract the node name and state from the chunk
                 for node_name, node_state in chunk.items():
                     print(f"[STREAM] Node '{node_name}' completed")
                     
                     # Update final state with the latest state
-                    final_state.update(node_state)
+                    if node_state and isinstance(node_state, dict):
+                        final_state.update(node_state)
                     
                     # Send progress updates based on which node completed
                     if self.progress_tracker:
@@ -1860,11 +1854,31 @@ class SlideDeckAgent:
                                 percent=15,
                                 details=f"Created plan for {len(slide_todos)} slides"
                             )
-                        elif node_name == "generation":
+                        elif node_name == "fan_out_generation":
+                            self.progress_tracker.update_progress(
+                                step="Starting parallel generation",
+                                percent=20,
+                                details="Fanning out slides for parallel processing"
+                            )
+                        elif node_name == "generate_slide":
+                            # Individual slide completion (now returns Command, not state)
+                            self.progress_tracker.update_progress(
+                                step="Starting slide generation",
+                                percent=25,
+                                details="Analyzing slide requirements and data needs"
+                            )
+                        elif node_name == "query_genie":
+                            # Genie query completion
+                            self.progress_tracker.update_progress(
+                                step="Querying data sources",
+                                percent=35,
+                                details="Fetching data from Genie"
+                            )
+                        elif node_name == "generate_html":
+                            # HTML generation completion
                             artifacts = node_state.get("artifacts", {})
-                            completed_slides = len(artifacts)
-                            if completed_slides > 0:
-                                # Calculate progress based on completed slides
+                            if artifacts:
+                                completed_slides = len(artifacts)
                                 total_slides = self.progress_tracker.total_slides or completed_slides
                                 progress = int((completed_slides / max(total_slides, 1)) * 80) + 10
                                 self.progress_tracker.update_progress(
@@ -1872,7 +1886,14 @@ class SlideDeckAgent:
                                     percent=progress,
                                     details=f"Completed slide generation"
                                 )
-                        elif node_name == "status":
+                        elif node_name == "handle_generation_error":
+                            # Error handling completion
+                            self.progress_tracker.update_progress(
+                                step="Handling generation error",
+                                percent=50,
+                                details="Creating placeholder slide"
+                            )
+                        elif node_name == "join_results":
                             slides_generated = len([slide for slide in node_state.get("status", []) if slide.is_generated])
                             self.progress_tracker.update_progress(
                                 step="Generation complete",
@@ -1890,14 +1911,41 @@ class SlideDeckAgent:
             # Update the agent's state with the final result
             self.initial_state = final_state
             
+            # Final result - handle case where status might not be populated
+            slides = []
+            status_list = []
+            
+            # Get slides from artifacts if status is empty
+            if "artifacts" in final_state and final_state["artifacts"]:
+                slides = list(final_state["artifacts"].values())
+                print(f"[STREAM] Using artifacts for slides: {len(slides)} slides")
+            
+            # Get status from final_state if available
+            if "status" in final_state and final_state["status"]:
+                status_list = final_state["status"]
+                slides = [slide.html for slide in status_list if slide.is_generated]
+                print(f"[STREAM] Using status for slides: {len(slides)} slides")
+            
+            # If no slides found, try to get from initial_state
+            if not slides and hasattr(self, 'initial_state'):
+                if "artifacts" in self.initial_state and self.initial_state["artifacts"]:
+                    slides = list(self.initial_state["artifacts"].values())
+                    print(f"[STREAM] Using initial_state artifacts: {len(slides)} slides")
+                elif "status" in self.initial_state and self.initial_state["status"]:
+                    status_list = self.initial_state["status"]
+                    slides = [slide.html for slide in status_list if slide.is_generated]
+                    print(f"[STREAM] Using initial_state status: {len(slides)} slides")
+            
+            print(f"[STREAM] Final slides count: {len(slides)}")
+            
             # Final result
             yield {
                 "node": "complete",
                 "result": {
-                    "success": True,
-                    "slides": [slide.html for slide in final_state["status"] if slide.is_generated],
-                    "status": final_state["status"],
-                    "errors": final_state["errors"]
+                    "success": len(slides) > 0,
+                    "slides": slides,
+                    "status": status_list,
+                    "errors": final_state.get("errors", [])
                 },
                 "progress": 100
             }
@@ -1923,7 +1971,6 @@ class SlideDeckAgent:
                 },
                 "progress": 0
             }
-    
     
     def get_slides(self) -> List[str]:
         """Get the generated slides as HTML strings."""
@@ -1965,96 +2012,20 @@ class SlideDeckAgent:
         return saved_files
 
 
-class SlideDeckAgentAdapter:
-    """Adapter to make SlideDeckAgent compatible with HtmlToPptxConverter.
-    
-    The HtmlToPptxConverter was designed for the old HtmlDeck architecture
-    from html_slides.py. This adapter provides the interface that 
-    HtmlToPptxConverter expects while using the new SlideDeckAgent internally.
-    
-    This enables PPTX export functionality without refactoring the entire
-    HtmlToPptxConverter, which would be a significant effort.
-    
-    Usage:
-        >>> agent = SlideDeckAgent()
-        >>> agent.process_message("Create 3 slides about AI")
-        >>> adapter = SlideDeckAgentAdapter(agent)
-        >>> converter = HtmlToPptxConverter(adapter)
-        >>> await converter.convert_to_pptx("output.pptx")
-    
-    Attributes:
-        agent: The SlideDeckAgent instance being adapted
-        theme: SlideTheme from the agent (required by HtmlToPptxConverter)
-    """
-    
-    def __init__(self, agent: SlideDeckAgent):
-        """Initialize adapter with a SlideDeckAgent instance.
-        
-        Args:
-            agent: The SlideDeckAgent instance to adapt
-        """
-        self.agent = agent
-        self.theme = agent.theme
-    
-    @property
-    def _slides(self) -> List[SlideAdapter]:
-        """Convert SlideStatus objects to Slide-like objects.
-        
-        This property mimics the old HtmlDeck._slides attribute that
-        HtmlToPptxConverter expects. It converts the new SlideStatus
-        objects to SlideAdapter objects that have the same interface
-        as the old Slide class.
-        
-        Returns:
-            List of SlideAdapter objects that mimic the old Slide interface
-        """
-        slides = []
-        for status in self.agent.get_status():
-            if status.is_generated:
-                slides.append(SlideAdapter.from_slide_status(status))
-        return slides
-    
-    def to_html(self) -> str:
-        """Generate combined HTML for all slides.
-        
-        This method mimics the old HtmlDeck.to_html() that HtmlToPptxConverter
-        expects. It combines all slide HTML into a single document.
-        
-        Returns:
-            Combined HTML string with all slides
-        """
-        slides_html = []
-        for status in self.agent.get_status():
-            if status.is_generated:
-                slides_html.append(status.html)
-        
-        # If no slides, return empty HTML
-        if not slides_html:
-            return "<html><body><h1>No slides generated</h1></body></html>"
-        
-        # For now, just concatenate slides (HtmlToPptxConverter processes them individually)
-        # The converter actually doesn't use this combined HTML for rendering,
-        # it accesses individual slides via _slides property
-        return "\n".join(slides_html)
-    
-    def __repr__(self) -> str:
-        """String representation for debugging."""
-        return f"SlideDeckAgentAdapter(slides={len(self._slides)}, theme={self.theme})"
-
-
 # =========================
 # Demo and Testing
 # =========================
 if __name__ == "__main__":
-    print("LangGraph Slide Deck Agent")
+    print("Fan-out LangGraph Slide Deck Agent")
     print("=" * 40)
     
     # Create agent
-    agent = SlideDeckAgent()
+    agent = FanOutSlideDeckAgent()
     
     # Test with a simple message
     result = agent.process_message(
-        "Create a 3-slide presentation about AI and Machine Learning with a professional, clean style"
+        "Create a 3-slide presentation about AI and Machine Learning with a professional, clean style",
+        max_concurrency=3
     )
     
     print(f"Generation result: {result['success']}")

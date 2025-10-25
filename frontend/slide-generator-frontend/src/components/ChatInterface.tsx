@@ -8,6 +8,8 @@ interface ChatMessage {
   content: string;
   metadata?: {
     title?: string;
+    details?: string;
+    progress?: number;
   };
 }
 
@@ -303,6 +305,19 @@ interface ToolGroup {
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate, refreshTick }) => {
+  // Persist session across refreshes
+  const [sessionId] = useState<string>(() => {
+    try {
+      const key = 'slidegen.sessionId';
+      const existing = localStorage.getItem(key);
+      if (existing && existing.trim().length > 0) return existing;
+      const newId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      localStorage.setItem(key, newId);
+      return newId;
+    } catch {
+      return 'default';
+    }
+  });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('Please provide a pitch deck about you');
   const [isLoading, setIsLoading] = useState(false);
@@ -315,18 +330,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate, refreshTic
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  useEffect(() => {
-    // While generating, always follow the latest message
-    if (isLoading) {
-      scrollToBottom();
-      return;
-    }
-    // After completion, only auto-scroll if the user is near the bottom
+  const isNearBottom = () => {
     const container = messagesEndRef.current?.parentElement;
-    const nearBottom = container
-      ? (container.scrollHeight - container.scrollTop - container.clientHeight) < 120
-      : true;
-    if (nearBottom) scrollToBottom();
+    if (!container) return true;
+    const threshold = 100;
+    return (container.scrollHeight - container.scrollTop - container.clientHeight) < threshold;
+  };
+
+  useEffect(() => {
+    // Only scroll if we're loading (following live updates) or if user is near bottom
+    if (isLoading || isNearBottom()) {
+      // Use requestAnimationFrame to ensure DOM is updated before scrolling
+      requestAnimationFrame(() => {
+        scrollToBottom();
+      });
+    }
   }, [messages, isLoading]);
 
   const toggleToolExpansion = (toolId: string) => {
@@ -344,7 +362,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate, refreshTic
   const pollForUpdates = async () => {
     try {
       console.log('Polling for updates...');
-      const response = await axios.get('http://localhost:8000/chat/status/default');
+      const response = await axios.get(`http://localhost:8000/chat/status/${sessionId}`);
       const newMessages = response.data.messages;
       const newMessageCount = response.data.message_count;
       
@@ -361,10 +379,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate, refreshTic
         }
         setMessages([...cleaned]);
         setLastMessageCount(newMessageCount);
-        // Force scroll to bottom right after render to follow live updates
-        setTimeout(() => {
-          try { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); } catch {}
-        }, 0);
+        
         // Refresh slides when ANY new message in this batch is a tool result
         const delta = (newMessages as ChatMessage[]).slice(lastMessageCount);
         const hasToolResult = delta.some(m => !!m?.metadata?.title && /tool result/i.test(m.metadata!.title!));
@@ -391,7 +406,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate, refreshTic
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
     }
-    pollingRef.current = setInterval(pollForUpdates, 600); // Poll a bit faster to catch staged steps
+    pollingRef.current = setInterval(pollForUpdates, 800); // Slightly slower polling to reduce load
   };
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -401,7 +416,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate, refreshTic
       const response = await axios.get('http://localhost:8000/health');
       console.log('Backend health check:', response.data);
       
-      const statusResponse = await axios.get('http://localhost:8000/chat/status/default');
+      const statusResponse = await axios.get(`http://localhost:8000/chat/status/${sessionId}`);
       console.log('Current conversation status:', statusResponse.data);
       
       // Force update UI with current messages
@@ -413,6 +428,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate, refreshTic
   };
 
   // Cleanup polling on unmount
+  // Load conversation history on component mount
+  useEffect(() => {
+    const loadConversationHistory = async () => {
+      try {
+        const response = await axios.get(`http://localhost:8000/chat/history/${sessionId}`);
+        setMessages([...response.data.messages]);
+        setLastMessageCount(response.data.messages.length);
+      } catch (err) {
+        console.log('No conversation history found, starting fresh');
+      }
+    };
+    
+    loadConversationHistory();
+  }, []);
+
   useEffect(() => {
     return () => {
       if (pollingRef.current) {
@@ -425,12 +455,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate, refreshTic
   useEffect(() => {
     const fetchOnce = async () => {
       try {
-        const statusResponse = await axios.get('http://localhost:8000/chat/status/default');
+      const statusResponse = await axios.get(`http://localhost:8000/chat/status/${sessionId}`);
         setMessages([...statusResponse.data.messages]);
         setLastMessageCount(statusResponse.data.message_count);
-        setTimeout(() => {
-          try { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); } catch {}
-        }, 0);
+        // Scroll will be handled by the main useEffect when messages change
       } catch (err) {
         // ignore
       }
@@ -453,13 +481,106 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ onSlideUpdate, refreshTic
     setIsLoading(true);
 
     try {
-      // Send message to backend
-      await axios.post('http://localhost:8000/chat', {
-        message: userMessage.content
+      // Use fetch with streaming for POST request
+      const response = await fetch('http://localhost:8000/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: userMessage.content,
+          session_id: sessionId
+        })
       });
 
-      // Start polling for updates
-      startPolling();
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.type === 'message') {
+                // Add assistant message
+                const assistantMessage: ChatMessage = {
+                  role: 'assistant',
+                  content: data.content
+                };
+                setMessages(prev => [...prev, assistantMessage]);
+              } else if (data.type === 'progress') {
+                // Add detailed progress update
+                const progressMessage: ChatMessage = {
+                  role: 'assistant',
+                  content: `🔄 ${data.step} (${data.progress_percent}%)`,
+                  metadata: { 
+                    title: 'Progress Update',
+                    details: data.details,
+                    progress: data.progress_percent
+                  }
+                };
+                setMessages(prev => [...prev, progressMessage]);
+              } else if (data.type === 'node_complete') {
+                // Add node completion update
+                const nodeMessage: ChatMessage = {
+                  role: 'assistant',
+                  content: `✅ ${data.node} completed (${data.progress}%)`,
+                  metadata: { title: 'Node Complete' }
+                };
+                setMessages(prev => [...prev, nodeMessage]);
+              } else if (data.type === 'complete') {
+                // Generation complete
+                const completeMessage: ChatMessage = {
+                  role: 'assistant',
+                  content: '✅ Generation complete!',
+                  metadata: { title: 'Done' }
+                };
+                setMessages(prev => [...prev, completeMessage]);
+                setIsLoading(false);
+                onSlideUpdate(); // Refresh slides
+                return; // Exit the function
+              } else if (data.type === 'slides_update') {
+                // Auto-refresh slides on backend push
+                onSlideUpdate();
+              } else if (data.type === 'error') {
+                // Handle error
+                const errorMessage: ChatMessage = {
+                  role: 'assistant',
+                  content: `❌ Error: ${data.message || 'Unknown error'}`,
+                  metadata: { title: 'Error' }
+                };
+                setMessages(prev => [...prev, errorMessage]);
+                setIsLoading(false);
+                return; // Exit the function
+              } else if (data.type === 'done') {
+                // Final completion
+                setIsLoading(false);
+                return; // Exit the function
+              }
+            } catch (error) {
+              console.error('Error parsing SSE data:', error);
+            }
+          }
+        }
+      }
+
     } catch (error) {
       console.error('Error sending message:', error);
       setIsLoading(false);

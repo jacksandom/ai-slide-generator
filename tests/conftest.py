@@ -29,16 +29,17 @@ def mock_databricks_responses(monkeypatch):
     """Mock Databricks service responses while using real client."""
     from unittest.mock import MagicMock
     
-    # Mock LLM serving endpoint responses
-    mock_llm_response = {
-        "choices": [{
-            "message": {
-                "content": "Test LLM response for slide generation"
-            }
-        }]
-    }
+    # Create proper OpenAI-style response object structure
+    mock_message = MagicMock()
+    mock_message.content = "Test LLM response for slide generation"
     
-    # Mock Genie responses
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+    
+    mock_llm_response = MagicMock()
+    mock_llm_response.choices = [mock_choice]
+    
+    # Mock Genie responses (these can stay as dict since they're accessed as such)
     mock_genie_response = {
         "statement_id": "test_statement_123",
         "status": {"state": "SUCCEEDED"},
@@ -60,8 +61,12 @@ def temp_output_dir():
 def sample_slide_html():
     """Sample valid slide HTML for testing."""
     return '''<!DOCTYPE html>
-<html><head><title>Test</title></head>
-<body style="width:1280px;height:720px;">
+<html><head>
+<title>Test</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body style="width:1280px;height:720px;overflow:hidden;">
 <h1 style="color:#102025;">Test Slide</h1>
 <p>Test content</p>
 </body></html>'''

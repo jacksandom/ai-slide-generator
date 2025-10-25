@@ -19,14 +19,18 @@ def client():
 @pytest.fixture
 def mock_fast_responses(monkeypatch):
     """Mock fast API responses for performance testing."""
+    # Create proper OpenAI-style response object
+    mock_message = MagicMock()
+    mock_message.content = '<!DOCTYPE html><html><head><title>Performance Test</title></head><body style="width:1280px;height:720px;"><h1 style="color:#102025;">Performance Test Slide</h1><p>Fast response for performance testing</p></body></html>'
+    
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+    
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+    
     mock_serving_client = MagicMock()
-    mock_serving_client.chat.completions.create.return_value = {
-        "choices": [{
-            "message": {
-                "content": '<!DOCTYPE html><html><head><title>Performance Test</title></head><body style="width:1280px;height:720px;"><h1 style="color:#102025;">Performance Test Slide</h1><p>Fast response for performance testing</p></body></html>'
-            }
-        }]
-    }
+    mock_serving_client.chat.completions.create.return_value = mock_response
     
     monkeypatch.setattr("slide_generator.tools.html_slides_agent.model_serving_client", mock_serving_client)
     return {"serving_client": mock_serving_client}

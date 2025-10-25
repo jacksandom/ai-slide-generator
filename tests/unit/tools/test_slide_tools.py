@@ -1,5 +1,6 @@
 """Test slide generation and manipulation tools."""
 import pytest
+import re
 from unittest.mock import patch, MagicMock
 from slide_generator.tools.html_slides_agent import (
     generate_slide_html, validate_slide_html, 
@@ -13,16 +14,18 @@ class TestSlideTools:
         """Test HTML slide generation produces valid output using real client."""
         from unittest.mock import MagicMock
         
+        # Create proper OpenAI-style response object
+        mock_message = MagicMock()
+        mock_message.content = '<!DOCTYPE html><html><head><title>Test Slide</title></head><body style="width:1280px;height:720px;"><h1 style="color:#102025;">Test Slide</h1><p>This is a test slide about testing</p></body></html>'
+        
+        mock_choice = MagicMock()
+        mock_choice.message = mock_message
+        
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+        
         # Mock the serving endpoint response while using real client for authentication
         mock_client = MagicMock()
-        # Return actual HTML content in the mocked response
-        mock_response = {
-            "choices": [{
-                "message": {
-                    "content": '<!DOCTYPE html><html><head><title>Test Slide</title></head><body style="width:1280px;height:720px;"><h1 style="color:#102025;">Test Slide</h1><p>This is a test slide about testing</p></body></html>'
-                }
-            }]
-        }
         mock_client.chat.completions.create.return_value = mock_response
         monkeypatch.setattr("slide_generator.tools.html_slides_agent.model_serving_client", mock_client)
         
@@ -74,7 +77,15 @@ class TestSlideTools:
         
         # Should preserve basic HTML structure
         assert "<html>" in sanitized
-        assert "<body>" in sanitized
+        
+        # Use regex to match complete body tag with attributes and content
+        body_pattern = r'<body[^>]*>.*?</body>'
+        assert re.search(body_pattern, sanitized, re.DOTALL), "Complete body element not found"
+        
+        # Verify specific body attributes are preserved
+        body_with_styles = r'<body[^>]*style=["\'][^"\']*(width:\s*1280px|height:\s*720px)[^"\'][^>]*>'
+        assert re.search(body_with_styles, sanitized), "Body tag with required dimensions not found"
+        
         assert "<h1" in sanitized
         assert "Test Slide" in sanitized
 
@@ -93,15 +104,18 @@ class TestSlideTools:
     @pytest.mark.databricks
     def test_slide_change_application(self, authenticated_databricks_client, monkeypatch):
         """Test applying changes to slide HTML."""
+        # Create proper OpenAI-style response object
+        mock_message = MagicMock()
+        mock_message.content = '<!DOCTYPE html><html><head><title>Modified Slide</title></head><body style="width:1280px;height:720px;"><h1 style="color:#102025;">Modified Slide</h1><p>This content has been updated</p></body></html>'
+        
+        mock_choice = MagicMock()
+        mock_choice.message = mock_message
+        
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+        
         # Mock the LLM client for change application
         mock_client = MagicMock()
-        mock_response = {
-            "choices": [{
-                "message": {
-                    "content": '<!DOCTYPE html><html><head><title>Modified Slide</title></head><body style="width:1280px;height:720px;"><h1 style="color:#102025;">Modified Slide</h1><p>This content has been updated</p></body></html>'
-                }
-            }]
-        }
         mock_client.chat.completions.create.return_value = mock_response
         monkeypatch.setattr("slide_generator.tools.html_slides_agent.model_serving_client", mock_client)
         
@@ -109,8 +123,8 @@ class TestSlideTools:
         <html><body><h1>Original Slide</h1><p>Original content</p></body></html>'''
         
         change = SlideChange(
-            operation="EDIT_TEXT",
-            args={"old_text": "Original", "new_text": "Modified"}
+            operation="REPLACE_TITLE",
+            args={"new_title": "Modified Slide"}
         )
         
         result = apply_slide_change.invoke({
@@ -128,25 +142,27 @@ class TestSlideTools:
         """Test SlideChange model validation."""
         # Valid change
         valid_change = SlideChange(
-            operation="EDIT_TEXT",
-            args={"old_text": "old", "new_text": "new"}
+            operation="REPLACE_TITLE",
+            args={"new_title": "Updated Title"}
         )
-        assert valid_change.operation == "EDIT_TEXT"
-        assert valid_change.args["old_text"] == "old"
+        assert valid_change.operation == "REPLACE_TITLE"
+        assert valid_change.args["new_title"] == "Updated Title"
 
     def test_html_generation_with_missing_parameters(self):
         """Test HTML generation handles missing parameters gracefully."""
-        try:
-            # This should either work with defaults or raise a clear error
-            result = generate_slide_html.invoke({
+        from pydantic_core import ValidationError
+        
+        # Tool requires all parameters, should raise ValidationError
+        with pytest.raises(ValidationError) as exc_info:
+            generate_slide_html.invoke({
                 "title": "Test"
-                # Missing outline and style_hint
+                # Missing required outline and style_hint
             })
-            # If it succeeds, should still return HTML
-            assert isinstance(result, str)
-        except (KeyError, TypeError):
-            # It's acceptable to require all parameters
-            pass
+        
+        # Verify the error mentions the missing fields
+        error_str = str(exc_info.value)
+        assert "outline" in error_str
+        assert "style_hint" in error_str
 
     def test_tools_are_properly_decorated(self):
         """Test that tools are properly decorated as LangChain tools."""
@@ -171,7 +187,10 @@ class TestSlideTools:
         # Verify basic structure
         assert '<!DOCTYPE html>' in sample_slide_html
         assert '<html>' in sample_slide_html
-        assert '<body>' in sample_slide_html
+        
+        # Use regex to match complete body tag structure  
+        body_pattern = r'<body[^>]*>.*?</body>'
+        assert re.search(body_pattern, sample_slide_html, re.DOTALL), "Complete body tag structure not found"
         
         # Verify required styling
         assert 'style=' in sample_slide_html

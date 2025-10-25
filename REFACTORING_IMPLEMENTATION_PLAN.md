@@ -1178,7 +1178,7 @@ pytest --tb=short              # Shorter tracebacks for faster feedback
 - Genie tools validate SQL execution flow
 - Performance tests include authentication overhead
 
----
+```
 
 ## Phase 2: Standardize Architecture (Priority: HIGH)
 **Timeline:** 1 week  

@@ -17,14 +17,18 @@ def client():
 @pytest.fixture
 def mock_slide_agent_responses(monkeypatch):
     """Mock slide agent responses for E2E testing."""
+    # Create proper OpenAI-style response object
+    mock_message = MagicMock()
+    mock_message.content = '<!DOCTYPE html><html><head><title>E2E Test Slide</title></head><body style="width:1280px;height:720px;"><h1 style="color:#102025;">E2E Test Slide</h1><p>This slide was generated during end-to-end testing</p></body></html>'
+    
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+    
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+    
     mock_serving_client = MagicMock()
-    mock_serving_client.chat.completions.create.return_value = {
-        "choices": [{
-            "message": {
-                "content": '<!DOCTYPE html><html><head><title>E2E Test Slide</title></head><body style="width:1280px;height:720px;"><h1 style="color:#102025;">E2E Test Slide</h1><p>This slide was generated during end-to-end testing</p></body></html>'
-            }
-        }]
-    }
+    mock_serving_client.chat.completions.create.return_value = mock_response
     
     monkeypatch.setattr("slide_generator.tools.html_slides_agent.model_serving_client", mock_serving_client)
     return {"serving_client": mock_serving_client}

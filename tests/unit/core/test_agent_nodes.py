@@ -73,15 +73,18 @@ class TestAgentNodes:
         """Test generation node creates slides using real client.""" 
         from unittest.mock import MagicMock
         
+        # Create proper OpenAI-style response object
+        mock_message = MagicMock()
+        mock_message.content = '<!DOCTYPE html><html><head><title>Test Slide</title></head><body style="width:1280px;height:720px;"><h1 style="color:#102025;">Test Slide</h1><p>This is a test slide about testing</p></body></html>'
+        
+        mock_choice = MagicMock()
+        mock_choice.message = mock_message
+        
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+        
         # Mock the serving endpoint response with HTML content
         mock_client = MagicMock()
-        mock_response = {
-            "choices": [{
-                "message": {
-                    "content": '<!DOCTYPE html><html><head><title>Test Slide</title></head><body style="width:1280px;height:720px;"><h1 style="color:#102025;">Test Slide</h1><p>This is a test slide about testing</p></body></html>'
-                }
-            }]
-        }
         mock_client.chat.completions.create.return_value = mock_response
         monkeypatch.setattr("slide_generator.tools.html_slides_agent.model_serving_client", mock_client)
         

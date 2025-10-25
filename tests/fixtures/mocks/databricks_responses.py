@@ -1,11 +1,22 @@
 """Mock Databricks API responses for testing."""
+from unittest.mock import MagicMock
+
+def create_openai_response(content: str):
+    """Create a proper OpenAI-style response object."""
+    mock_message = MagicMock()
+    mock_message.content = content
+    
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+    
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+    
+    return mock_response
 
 # Mock LLM serving endpoint responses
 MOCK_LLM_RESPONSES = {
-    "slide_generation": {
-        "choices": [{
-            "message": {
-                "content": '''<!DOCTYPE html>
+    "slide_generation": create_openai_response('''<!DOCTYPE html>
 <html>
 <head>
     <title>AI Overview</title>
@@ -19,14 +30,8 @@ MOCK_LLM_RESPONSES = {
         <li>Natural Language Processing helps computers understand human language</li>
     </ul>
 </body>
-</html>'''
-            }
-        }]
-    },
-    "intent_detection": {
-        "choices": [{
-            "message": {
-                "content": '''
+</html>'''),
+    "intent_detection": create_openai_response('''
 {
     "intent": "CREATE_PRESENTATION",
     "entities": {
@@ -36,14 +41,8 @@ MOCK_LLM_RESPONSES = {
     },
     "confidence": 0.95
 }
-'''
-            }
-        }]
-    },
-    "planning_response": {
-        "choices": [{
-            "message": {
-                "content": '''
+'''),
+    "planning_response": create_openai_response('''
 Based on the user's request, I'll create 3 slides about machine learning:
 
 1. Slide 1: Introduction to Machine Learning
@@ -51,10 +50,7 @@ Based on the user's request, I'll create 3 slides about machine learning:
 3. Slide 3: Real-world Applications
 
 I'll generate professional slides with clear structure and visual hierarchy.
-'''
-            }
-        }]
-    }
+''')
 }
 
 # Mock Genie SQL execution responses
@@ -114,8 +110,6 @@ MOCK_VECTOR_SEARCH_RESPONSES = {
 # Complete mock configuration for different test scenarios
 def get_mock_llm_client():
     """Returns a mock LLM client with predefined responses."""
-    from unittest.mock import MagicMock
-    
     mock_client = MagicMock()
     mock_client.chat.completions.create.return_value = MOCK_LLM_RESPONSES["slide_generation"]
     return mock_client

@@ -29,9 +29,15 @@ except Exception:
 from slide_generator.config import config
 from databricks.sdk import WorkspaceClient
 
-# Initialize Databricks client and components
-# Use explicit profile so local dev can auth with the intended workspace
-ws = WorkspaceClient(profile='logfood', product='slide-generator')
+# Databricks client - lazy loaded to avoid configuration issues
+_ws = None
+
+def get_databricks_client():
+    """Get or create Databricks client (lazy initialization)."""
+    global _ws
+    if _ws is None:
+        _ws = WorkspaceClient(profile=config.databricks_profile, product='slide-generator')
+    return _ws
 
 def get_logo_base64():
     """Load the EY-Parthenon logo and encode it as base64 for embedding in HTML."""

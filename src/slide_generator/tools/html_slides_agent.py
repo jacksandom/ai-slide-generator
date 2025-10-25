@@ -92,9 +92,24 @@ ALLOWED_INLINE_SCRIPT_KEYWORDS = (
     "tailwind.config",
 )
 
-# LLM Configuration
-ws = WorkspaceClient(profile='logfood', product='slide-generator')
-model_serving_client = ws.serving_endpoints.get_open_ai_client()
+# LLM Configuration - lazy loaded to avoid circular imports
+_ws = None
+_model_serving_client = None
+
+def get_databricks_client():
+    """Get or create Databricks client (lazy initialization)."""
+    global _ws
+    if _ws is None:
+        from slide_generator.config import config
+        _ws = WorkspaceClient(profile=config.databricks_profile, product='slide-generator')
+    return _ws
+
+def get_model_serving_client():
+    """Get or create model serving client (lazy initialization).""" 
+    global _model_serving_client
+    if _model_serving_client is None:
+        _model_serving_client = get_databricks_client().serving_endpoints.get_open_ai_client()
+    return _model_serving_client
 
 NLU_ENDPOINT = "databricks-gpt-oss-120b"
 PLAN_ENDPOINT = "databricks-gpt-oss-120b" 
@@ -256,7 +271,7 @@ Has existing slides: {has_existing_slides}
 IMPORTANT: If the user is requesting 'Slide 2', 'Slide 3', etc. AND there are existing slides (has_existing_slides=True), 
 then classify as ADD_CHANGES, not REQUEST_DECK."""
     
-    response = model_serving_client.chat.completions.create(
+    response = get_model_serving_client().chat.completions.create(
         model=NLU_ENDPOINT,
         messages=[
             {"role": "system", "content": sys},
@@ -395,7 +410,7 @@ def create_slide_todos(topic: str, style_hint: str, n_slides: int) -> List[Slide
     )
     user = f"Topic: {topic}\nStyle: {style_hint}\nSlides requested: {n_slides}\nReturn EXACTLY {n_slides+1} items."
     
-    response = model_serving_client.chat.completions.create(
+    response = get_model_serving_client().chat.completions.create(
         model=PLAN_ENDPOINT,
         messages=[
             {"role": "system", "content": sys},
@@ -447,7 +462,7 @@ CRITICAL INSTRUCTIONS:
 
 Create a beautiful, modern slide using Tailwind CSS with the exact brand colors and spacing specified. Ensure all content fits within 1280x720 pixels with proper contrast and visibility. Use white background and symmetrical layout. IMPORTANT: Use Navy 900 (#102025) for the main title, NOT gray colors."""
     
-    response = model_serving_client.chat.completions.create(
+    response = get_model_serving_client().chat.completions.create(
         model=HTML_ENDPOINT,
         messages=[
             {"role": "system", "content": sys},
@@ -548,7 +563,7 @@ CRITICAL INSTRUCTIONS:
 
 Apply the change while keeping the modern Tailwind CSS styling and design."""
     
-    response = model_serving_client.chat.completions.create(
+    response = get_model_serving_client().chat.completions.create(
         model=HTML_ENDPOINT,
         messages=[
             {"role": "system", "content": sys},

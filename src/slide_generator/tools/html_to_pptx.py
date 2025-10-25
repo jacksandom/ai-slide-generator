@@ -34,11 +34,40 @@ try:
 except ImportError:
     PYTHON_PPTX_AVAILABLE = False
 
-from .html_slides import HtmlDeck, Slide
+# Legacy import removed - now works with SlideDeckAgent via adapter pattern
+from typing import Protocol, Any
 from .visual_capture_engine import (
     VisualizationCaptureEngine, VisualizationArea, CaptureMetrics, 
     DebugMode, SpatialCollisionDetector
 )
+
+# Protocol for slide deck interface
+class SlideTheme(Protocol):
+    """Protocol for slide theme interface."""
+    bottom_right_logo_url: Optional[str]
+    footer_text: Optional[str]
+
+class Slide(Protocol):
+    """Protocol for individual slide interface."""
+    slide_type: str
+    title: str
+    html: str
+
+class SlideDeckProtocol(Protocol):
+    """Protocol for slide deck interface that the converter expects."""
+    
+    def get_slides(self) -> List[str]:
+        """Get slides as list of HTML strings."""
+        ...
+    
+    @property  
+    def theme(self) -> SlideTheme:
+        """Get the slide theme."""
+        ...
+        
+    def to_html(self) -> List[str]:
+        """Get slides as HTML list (compatibility method)."""
+        ...
 
 
 @dataclass
@@ -55,11 +84,11 @@ class ChartElement:
 class HtmlToPptxConverter:
     """Converts HTML slides to PowerPoint format with chart preservation."""
     
-    def __init__(self, html_deck: HtmlDeck):
-        """Initialize converter with an HTML deck.
+    def __init__(self, slide_deck: SlideDeckProtocol):
+        """Initialize converter with a slide deck.
         
         Args:
-            html_deck: The HtmlDeck instance to convert
+            slide_deck: The slide deck instance to convert (SlideDeckAgent or compatible)
         """
         if not PLAYWRIGHT_AVAILABLE:
             raise ImportError("Playwright is required for HTML to PPTX conversion. Install with: pip install playwright")
@@ -67,9 +96,28 @@ class HtmlToPptxConverter:
         if not PYTHON_PPTX_AVAILABLE:
             raise ImportError("python-pptx is required for PowerPoint generation. Install with: pip install python-pptx")
         
-        self.html_deck = html_deck
-        self.slides = html_deck._slides
-        self.theme = html_deck.theme
+        self.slide_deck = slide_deck
+        # Convert HTML strings to slide objects for compatibility
+        slides_html = slide_deck.get_slides() if hasattr(slide_deck, 'get_slides') else slide_deck.to_html()
+        self.slides = [self._create_slide_from_html(html, idx) for idx, html in enumerate(slides_html)]
+        self.theme = slide_deck.theme
+    
+    def _create_slide_from_html(self, html: str, idx: int):
+        """Create a slide object from HTML string for compatibility."""
+        from bs4 import BeautifulSoup
+        
+        # Simple slide object to match the expected interface
+        class SimpleSlide:
+            def __init__(self, html_content: str, index: int):
+                self.html = html_content
+                self.slide_type = "content"  # Default type
+                
+                # Extract title from HTML
+                soup = BeautifulSoup(html_content, 'html.parser')
+                h1_tag = soup.find('h1')
+                self.title = h1_tag.get_text().strip() if h1_tag else f"Slide {index + 1}"
+                
+        return SimpleSlide(html, idx)
         
     async def convert_to_pptx(self, output_path: str, include_charts: bool = True, enhanced_capture: bool = True) -> str:
         """Convert HTML slides to PowerPoint format with enhanced capture.
@@ -123,7 +171,7 @@ class HtmlToPptxConverter:
             await page.set_viewport_size({"width": 1920, "height": 1080})
             
             # Generate HTML content
-            html_content = self.html_deck.to_html()
+            html_content = self.slide_deck.get_slides() if hasattr(self.slide_deck, 'get_slides') else self.slide_deck.to_html()
             
             # Load the HTML content
             await page.set_content(html_content)
@@ -333,7 +381,7 @@ class HtmlToPptxConverter:
             # Initialize capture engine
             capture_engine = VisualizationCaptureEngine()
             
-            html_content = self.html_deck.to_html()
+            html_content = self.slide_deck.get_slides() if hasattr(self.slide_deck, 'get_slides') else self.slide_deck.to_html()
             await page.set_content(html_content)
             await page.wait_for_timeout(2000)
             
@@ -1317,11 +1365,11 @@ class HtmlToPptxConverter:
 
 
 # Tool integration functions
-def tool_export_to_pptx(deck: HtmlDeck, output_path: str, include_charts: bool = True, enhanced_capture: bool = True) -> str:
-    """Export HTML deck to PowerPoint format with enhanced capture.
+def tool_export_to_pptx(deck: SlideDeckProtocol, output_path: str, include_charts: bool = True, enhanced_capture: bool = True) -> str:
+    """Export slide deck to PowerPoint format with enhanced capture.
     
     Args:
-        deck: The HtmlDeck instance to export
+        deck: The slide deck instance to export (SlideDeckAgent or compatible)
         output_path: Path where the .pptx file will be saved
         include_charts: Whether to capture and include charts/visualizations
         enhanced_capture: Use enhanced container-level capture (recommended)
@@ -1341,7 +1389,7 @@ def tool_export_to_pptx(deck: HtmlDeck, output_path: str, include_charts: bool =
         return f"Error exporting to PowerPoint: {str(e)}"
 
 
-# Add tool definition to HtmlDeck
+# Tool definition for slide deck PPTX export
 PPTX_EXPORT_TOOL = {
     "type": "function",
     "function": {

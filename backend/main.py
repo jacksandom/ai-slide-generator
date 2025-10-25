@@ -694,16 +694,25 @@ async def export_slides_pptx() -> FileResponse:
         # Ensure directory exists
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Convert - we need to create a temporary HtmlDeck-like object for the converter
-        # Since the converter expects the old interface, we'll create a simple adapter
-        class AgentAdapter:
+        # Create adapter that implements the SlideDeckProtocol for the converter
+        class SlideDeckAgentAdapter:
             def __init__(self, agent):
                 self.agent = agent
             
-            def tool_get_html(self):
+            def get_slides(self):
+                """Get slides as list of HTML strings."""
                 return self.agent.get_slides()
+            
+            def to_html(self):
+                """Compatibility method - same as get_slides."""
+                return self.get_slides()
+                
+            @property
+            def theme(self):
+                """Get the slide theme."""
+                return self.agent.theme
         
-        adapter = AgentAdapter(slide_agent)
+        adapter = SlideDeckAgentAdapter(slide_agent)
         converter = HtmlToPptxConverter(adapter)
         await converter.convert_to_pptx(str(output_path), include_charts=True)
 

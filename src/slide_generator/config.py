@@ -24,7 +24,7 @@ LLM_ENDPOINT = os.getenv("LLM_ENDPOINT", DEFAULT_LLM_ENDPOINT)
 # Databricks settings
 DATABRICKS_HOST = os.getenv("DATABRICKS_HOST")
 DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
-DATABRICKS_PROFILE = os.getenv("DATABRICKS_PROFILE", "default")
+DATABRICKS_PROFILE = os.getenv("DATABRICKS_PROFILE", "DEFAULT")
 
 # Gradio settings (DEPRECATED - Gradio frontend removed)
 # Kept for backward compatibility - will be removed in Phase 3

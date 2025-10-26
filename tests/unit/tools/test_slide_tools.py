@@ -27,7 +27,7 @@ class TestSlideTools:
         # Mock the serving endpoint response while using real client for authentication
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_response
-        monkeypatch.setattr("slide_generator.tools.html_slides_agent.model_serving_client", mock_client)
+        monkeypatch.setattr("slide_generator.tools.html_slides_agent.get_model_serving_client", lambda: mock_client)
         
         result = generate_slide_html.invoke({
             "title": "Test Slide", 
@@ -117,7 +117,7 @@ class TestSlideTools:
         # Mock the LLM client for change application
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_response
-        monkeypatch.setattr("slide_generator.tools.html_slides_agent.model_serving_client", mock_client)
+        monkeypatch.setattr("slide_generator.tools.html_slides_agent.get_model_serving_client", lambda: mock_client)
         
         original_html = '''<!DOCTYPE html>
         <html><body><h1>Original Slide</h1><p>Original content</p></body></html>'''

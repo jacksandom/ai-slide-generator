@@ -40,7 +40,7 @@ def mock_slide_agent_responses(monkeypatch):
         "result": {"data_array": [["AI", "100%"], ["ML", "85%"]]}
     }
     
-    monkeypatch.setattr("slide_generator.tools.html_slides_agent.model_serving_client", mock_serving_client)
+    monkeypatch.setattr("slide_generator.tools.html_slides_agent.get_model_serving_client", lambda: mock_serving_client)
     
     return {
         "serving_client": mock_serving_client,

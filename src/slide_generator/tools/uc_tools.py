@@ -2,12 +2,24 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
 from unitycatalog.ai.core.databricks import DatabricksFunctionClient
 import pandas as pd
-ws = WorkspaceClient(product='slide-generator', profile='e2-demo')
+
+# Lazy loading to avoid circular imports and configuration issues
+_ws = None
+
+def get_workspace_client():
+    """Get or create workspace client (lazy initialization)."""
+    global _ws
+    if _ws is None:
+        from slide_generator.config import config
+        _ws = WorkspaceClient(product='slide-generator', profile=config.databricks_profile)
+    return _ws
 
 space_id = "01effebcc2781b6bbb749077a55d31e3"
 example_query = "give me ey spend by day for last 6 months"
 
-def query_genie_space(question: str, space_id: str = space_id, workspace_client: WorkspaceClient = ws) -> str:
+def query_genie_space(question: str, space_id: str = space_id, workspace_client: WorkspaceClient = None) -> str:
+    if workspace_client is None:
+        workspace_client = get_workspace_client()
 
     response = workspace_client.genie.start_conversation_and_wait(
         space_id=space_id,
@@ -34,17 +46,24 @@ def query_genie_space(question: str, space_id: str = space_id, workspace_client:
 
 
 vs_tool = "tariq_yaaqba.rag_demo.similarity_vector_search"
-client = DatabricksFunctionClient(
-    profile='e2-demo'
-)
+_function_client = None
+
+def get_function_client():
+    """Get or create function client (lazy initialization)."""
+    global _function_client
+    if _function_client is None:
+        from slide_generator.config import config
+        _function_client = DatabricksFunctionClient(profile=config.databricks_profile)
+    return _function_client
 def retrieval_tool(question: str) -> str:
+    client = get_function_client()
     response = client.execute_function(function_name=vs_tool, parameters={"question": question})
-    content =response.value
+    content = response.value
     return content
 
 
 def visualisation_tool(question: str) -> str:
-    client = WorkspaceClient()
+    client = get_workspace_client()
 
     message = [ChatMessage(role=ChatMessageRole.USER, content=question)]
 

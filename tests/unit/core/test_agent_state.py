@@ -40,22 +40,23 @@ class TestSlideDeckAgent:
         agent = SlideDeckAgent()
         
         # Mock the LLM endpoint responses at the serving client level
-        with patch('slide_generator.tools.html_slides_agent.model_serving_client') as mock_client:
+        with patch('slide_generator.tools.html_slides_agent.get_model_serving_client') as mock_get_client:
+            mock_client = MagicMock()
             mock_client.chat.completions.create.return_value = mock_databricks_responses["llm_response"]
+            mock_get_client.return_value = mock_client
             
             # Test message processing with real client but mocked responses
             initial_state = agent.initial_state.copy()
             
-            # Process first message
-            state1 = {"messages": [{"role": "user", "content": "Create 2 slides about AI"}]}
-            state1.update(initial_state)
+            # Create test states with different message counts
+            state1 = initial_state.copy()
+            state1["messages"] = [{"role": "user", "content": "Create 2 slides about AI"}]
             
-            # Process second message
-            state2 = {"messages": [
+            state2 = initial_state.copy()
+            state2["messages"] = [
                 {"role": "user", "content": "Create 2 slides about AI"},
                 {"role": "user", "content": "Add a slide about machine learning"}
-            ]}
-            state2.update(initial_state)
+            ]
             
             # Verify state structure is maintained
             assert isinstance(state1["messages"], list)
@@ -66,8 +67,8 @@ class TestSlideDeckAgent:
         """Test SlideTheme validation and defaults."""
         # Test default theme
         theme = SlideTheme()
-        assert theme.bottom_right_logo_url == ""
-        assert theme.footer_text == ""
+        assert theme.bottom_right_logo_url is None
+        assert theme.footer_text is None
         
         # Test custom theme
         custom_theme = SlideTheme(
@@ -81,19 +82,18 @@ class TestSlideDeckAgent:
         """Test SlideConfig validation and constraints."""
         # Test default config
         config = SlideConfig()
-        assert config.max_slides >= 1
-        assert config.max_slides <= 20
+        assert config.n_slides is None  # Default is None
         
         # Test custom config
-        custom_config = SlideConfig(max_slides=10)
-        assert custom_config.max_slides == 10
+        custom_config = SlideConfig(n_slides=10)
+        assert custom_config.n_slides == 10
         
         # Test invalid config should raise validation error
         with pytest.raises(ValueError):
-            SlideConfig(max_slides=0)  # Should fail validation
+            SlideConfig(n_slides=0)  # Should fail validation (ge=1)
             
         with pytest.raises(ValueError):
-            SlideConfig(max_slides=25)  # Should fail validation
+            SlideConfig(n_slides=50)  # Should fail validation (le=40)
 
     def test_state_structure_compliance(self):
         """Test that agent state follows the expected TypedDict structure."""

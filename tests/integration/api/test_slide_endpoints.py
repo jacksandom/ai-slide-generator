@@ -28,7 +28,7 @@ def mock_slide_agent_responses(monkeypatch):
     mock_serving_client = MagicMock()
     mock_serving_client.chat.completions.create.return_value = mock_response
     
-    monkeypatch.setattr("slide_generator.tools.html_slides_agent.model_serving_client", mock_serving_client)
+    monkeypatch.setattr("slide_generator.tools.html_slides_agent.get_model_serving_client", lambda: mock_serving_client)
     return {"serving_client": mock_serving_client}
 
 

@@ -624,7 +624,12 @@ async def refresh_slides(session_id: str = "default"):
     try:
         slide_agent = session_manager.get_slide_agent(session_id)
         slides_list = slide_agent.get_slides()
-        return {"slides": slides_list}
+        status_list = slide_agent.get_status()
+        return {
+            "slides": slides_list,
+            "status": status_list,
+            "message": f"Refreshed {len(slides_list)} slides"
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error refreshing slides: {str(e)}")
 
@@ -633,8 +638,14 @@ async def reset_slides(session_id: str = "default"):
     """Reset slides to empty deck"""
     try:
         session_manager.reset_session_agent(session_id)
+        slide_agent = session_manager.get_slide_agent(session_id)
+        status_list = slide_agent.get_status()
         print(f"[DEBUG] reset_slides - Reset session agent for session {session_id}")
-        return {"message": "Slides reset successfully"}
+        return {
+            "message": "Slides reset successfully",
+            "status": status_list,
+            "slides": []
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error resetting slides: {str(e)}")
 
@@ -643,8 +654,14 @@ async def clear_slides(session_id: str = "default"):
     """Clear current slides but keep the agent instance for follow-on requests"""
     try:
         session_manager.clear_session_agent(session_id)
+        slide_agent = session_manager.get_slide_agent(session_id)
+        status_list = slide_agent.get_status()
         print(f"[DEBUG] clear_slides - Cleared session agent state for session {session_id}")
-        return {"message": "Slides cleared successfully"}
+        return {
+            "message": "Slides cleared successfully",
+            "status": status_list,
+            "slides": []
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error clearing slides: {str(e)}")
 
@@ -776,8 +793,11 @@ async def get_conversation(session_id: str):
     """Get conversation history for debugging"""
     conv = get_or_create_conversation(session_id)
     return {
-        "openai_conversation": conv["openai_conversation"],
-        "api_conversation": conv["api_conversation"]
+        "conversation": conv["api_conversation"],  # Main conversation for UI
+        "openai_conversation": conv["openai_conversation"],  # Debug info
+        "api_conversation": conv["api_conversation"],  # Backward compatibility
+        "session_id": session_id,
+        "message_count": len(conv["api_conversation"])
     }
 
 if __name__ == "__main__":

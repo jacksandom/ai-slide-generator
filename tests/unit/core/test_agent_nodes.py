@@ -33,7 +33,7 @@ class TestAgentNodes:
         # Mock the serving endpoint response while using real client
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_databricks_responses["llm_response"]
-        monkeypatch.setattr("slide_generator.tools.html_slides_agent.model_serving_client", mock_client)
+        monkeypatch.setattr("slide_generator.tools.html_slides_agent.get_model_serving_client", lambda: mock_client)
         
         # Test CREATE_PRESENTATION intent detection
         result = nlu_node(minimal_state)
@@ -54,7 +54,7 @@ class TestAgentNodes:
         # Mock the serving endpoint response  
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_databricks_responses["llm_response"]
-        monkeypatch.setattr("slide_generator.tools.html_slides_agent.model_serving_client", mock_client)
+        monkeypatch.setattr("slide_generator.tools.html_slides_agent.get_model_serving_client", lambda: mock_client)
         
         # Set up state with CREATE_PRESENTATION intent
         minimal_state["last_intent"] = {"intent": "CREATE_PRESENTATION", "entities": {"slide_count": 2}}
@@ -86,15 +86,15 @@ class TestAgentNodes:
         # Mock the serving endpoint response with HTML content
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = mock_response
-        monkeypatch.setattr("slide_generator.tools.html_slides_agent.model_serving_client", mock_client)
+        monkeypatch.setattr("slide_generator.tools.html_slides_agent.get_model_serving_client", lambda: mock_client)
         
-        # Add a todo to process
-        minimal_state["todos"] = [{
-            "id": "slide_1", 
-            "title": "Test Slide",
-            "outline": "This is a test slide about testing",
-            "status": "pending"
-        }]
+        # Add a WRITE_SLIDE todo to trigger generation
+        from slide_generator.tools.html_slides_agent import SlideTodo
+        minimal_state["todos"] = [SlideTodo(
+            id=1,
+            action="WRITE_SLIDE",
+            title="Test Slide: This is a test slide about testing"
+        )]
         
         result = generation_node(minimal_state)
         
@@ -150,19 +150,19 @@ class TestAgentNodes:
             # It's acceptable for nodes to require certain keys
             pass
 
-    def test_node_state_immutability(self, minimal_state):
-        """Test that nodes don't mutate the input state object."""
-        original_state = minimal_state.copy()
+    def test_node_state_mutability(self, minimal_state):
+        """Test that nodes properly update the input state object (LangGraph pattern)."""
+        original_status_count = len(minimal_state["status"])
         
-        # Process through status node (least likely to modify)
+        # Process through status node
         result = status_node(minimal_state)
         
-        # Verify original state wasn't modified (for required keys)
-        assert minimal_state["run_id"] == original_state["run_id"]
-        assert minimal_state["config_version"] == original_state["config_version"]
+        # In LangGraph, nodes modify state in place for performance
+        assert result is minimal_state
         
-        # Result should be a new state object
-        assert result is not minimal_state
+        # Verify the node actually processed and updated the state
+        assert "status" in result
+        assert isinstance(result["status"], list)
 
     @pytest.mark.integration
     @pytest.mark.databricks

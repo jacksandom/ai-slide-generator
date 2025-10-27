@@ -1,23 +1,27 @@
 """FastAPI backend for the slide generator application."""
 
-import html
-import json
-import base64
+import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-import re
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from datetime import datetime
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 import time
+import json
+import asyncio
 
 # Import slide generator modules
 import sys
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from slide_generator.tools import html_slides_agent
+from slide_generator.tools.html_slides_agent_fanout import FanOutSlideDeckAgent, FanOutProgressTracker
+from slide_generator.config import config, get_output_path
+import base64
+
 # Make UC tools optional to allow backend to start without unitycatalog/databricks-connect
 try:
     from slide_generator.tools import uc_tools  # type: ignore
@@ -25,19 +29,9 @@ try:
 except Exception:
     print("Warning: UC tools not available; starting without UC_tools.")
     TOOL_DICT = {}
-# Legacy chatbot.py removed - now using LangGraph-based agent
-from slide_generator.config import config
-from databricks.sdk import WorkspaceClient
 
 # Databricks client - lazy loaded to avoid configuration issues
-_ws = None
-
-def get_databricks_client():
-    """Get or create Databricks client (lazy initialization)."""
-    global _ws
-    if _ws is None:
-        _ws = WorkspaceClient(profile=config.databricks_profile, product='slide-generator')
-    return _ws
+from databricks.sdk import WorkspaceClient
 
 def get_logo_base64():
     """Load the EY-Parthenon logo and encode it as base64 for embedding in HTML."""
@@ -49,6 +43,20 @@ def get_logo_base64():
     except FileNotFoundError:
         print(f"Warning: Logo file not found at {logo_path}")
         return ""
+
+# Initialize V3 PowerPoint converter
+try:
+    from slide_generator.tools.html_to_pptx_v3 import HtmlToPptxConverterV3
+    db_client = WorkspaceClient(profile=config.databricks_profile, product='slide-generator')
+    pptx_converter_v3 = HtmlToPptxConverterV3(
+        workspace_client=db_client,
+        model_endpoint="databricks-claude-sonnet-4-5"
+    )
+    print("✅ V3 PowerPoint converter initialized")
+except Exception as e:
+    print(f"⚠️  V3 converter initialization failed: {e}")
+    print("   PowerPoint export will not be available")
+    pptx_converter_v3 = None
 
 # Session management - replaces global state
 class SessionManager:
@@ -65,17 +73,16 @@ class SessionManager:
     def get_or_create_session(self, session_id: str) -> Dict:
         """Get or create session data including agent and conversation."""
         if session_id not in self.sessions:
+            # Use FanOut agent for better performance
             self.sessions[session_id] = {
-                'slide_agent': html_slides_agent.SlideDeckAgent(theme=self.default_theme),
-                'conversation': {
-                    'openai_conversation': [{"role": "system", "content": config.system_prompt}],
-                    'api_conversation': []
-                },
+                'slide_agent': FanOutSlideDeckAgent(theme=self.default_theme),
+                'conversation': [],
+                'latest_slides': [],
                 'created_at': time.time()
             }
         return self.sessions[session_id]
     
-    def get_slide_agent(self, session_id: str) -> html_slides_agent.SlideDeckAgent:
+    def get_slide_agent(self, session_id: str):
         """Get the slide agent for a session."""
         session = self.get_or_create_session(session_id)
         return session['slide_agent']
@@ -83,7 +90,8 @@ class SessionManager:
     def reset_session_agent(self, session_id: str) -> None:
         """Reset the slide agent for a session."""
         session = self.get_or_create_session(session_id)
-        session['slide_agent'] = html_slides_agent.SlideDeckAgent(theme=self.default_theme)
+        session['slide_agent'] = FanOutSlideDeckAgent(theme=self.default_theme)
+        session['latest_slides'] = []
     
     def clear_session_agent(self, session_id: str) -> None:
         """Clear the slide agent state but keep the agent instance."""
@@ -103,6 +111,7 @@ class SessionManager:
                 "metrics": {},
                 "run_id": ""
             })
+        session['latest_slides'] = []
 
 # Global session manager instance
 session_manager = SessionManager()
@@ -119,20 +128,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global state removed - now using SessionManager for proper session isolation
+# Conversation state managed through SessionManager
 
-# --- Demo static mode -------------------------------------------------------
-# When enabled, any user prompt will render a predefined set of static slides
-# without calling the LLM or tools. Useful for controlled demos.
-# NOTE: This is currently enabled and uses the new LLM flow (_run_llm_flow)
-DEMO_STATIC_MODE: bool = True
+def get_or_create_conversation(session_id: str) -> List:
+    """Get or create conversation for session"""
+    session = session_manager.get_or_create_session(session_id)
+    return session['conversation']
 
 def _append_api_message(session_id: str, role: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
-    session = session_manager.get_or_create_session(session_id)
-    session["conversation"]["api_conversation"].append(ChatMessage(role=role, content=content, metadata=metadata))
-
-
-
+    """Append a message to the conversation history"""
+    conv = get_or_create_conversation(session_id)
+    conv.append(ChatMessage(role=role, content=content, metadata=metadata))
 
 
 def _run_llm_flow(session_id: str, user_prompt: str) -> None:
@@ -209,7 +215,7 @@ def _run_llm_flow(session_id: str, user_prompt: str) -> None:
         
         # Step 5: Show final status
         status_list = result.get("status", [])
-        status_text = "\n".join([f"Slide {s.id}: {s.title}" for s in status_list])
+        status_text = "\n".join([f"Slide {s.position}: {s.title}" for s in status_list])
         print(f"[DEBUG] LLM Flow - Status: {status_text}")
         
         if is_follow_on:
@@ -239,253 +245,125 @@ def _run_llm_flow(session_id: str, user_prompt: str) -> None:
             metadata={"title": "Error"}
         )
 
-def _run_prism_flow(session_id: str) -> None:
+def _run_llm_flow_streaming(session_id: str, user_prompt: str) -> None:
+    """Run the LLM flow with streaming progress updates"""
     try:
-        # Reset the session agent for demo mode
-        session_manager.reset_session_agent(session_id)
+        # Get session-specific slide agent
         slide_agent = session_manager.get_slide_agent(session_id)
-
-        PRISM_SLIDES: List[str] = [
-            """<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"/><meta content=\"width=device-width, initial-scale=1.0\" name=\"viewport\"/><title>Project Prism - The Opportunity</title><link href=\"https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css\" rel=\"stylesheet\"/><link href=\"https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css\" rel=\"stylesheet\"/><link href=\"https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap\" rel=\"stylesheet\"/><style>body{font-family:'Roboto',sans-serif;background-color:white;color:#1A365D;margin:0;padding:0}.slide-container{width:1280px;min-height:720px;overflow:hidden;position:relative}.header{padding:0 60px 8px}.header h1{margin:0}.content{padding:0 60px}.opportunity-icon{color:#FF5722;font-size:48px;margin-bottom:20px}.cost-icon{color:#FF5722;font-size:48px;margin-bottom:20px}.separator{width:2px;background-color:#E2E8F0;height:400px}.accent-text{color:#FF5722;font-weight:500}</style></head><body><div class=\"slide-container\"><div class=\"header\"><h1 class=\"text-3xl font-bold\">The Opportunity: AI Slide Generation for Consulting</h1></div><div class=\"content\"><div class=\"flex justify-between items-start\"><div class=\"w-1/2 pr-10\"><div class=\"opportunity-icon\"><i class=\"fas fa-lightbulb\"></i></div><h2 class=\"text-xl font-semibold mb-4\">Transforming Slide Creation for Consulting</h2><p class=\"mb-4\">Imagine if consulting firms could <span class=\"accent-text\">instantly create tailored, secure slides</span> from proprietary know-how &amp; sensitive client data—<span class=\"accent-text\">automagically</span>.</p><ul class=\"list-disc pl-5 space-y-2\"><li>Leverage existing firm knowledge bases and client data</li><li>Maintain security and compliance across all materials</li><li>Generate high-quality slides that align with firm branding</li></ul><p class=\"mt-4\">Unlocking immediate value for industry leaders:</p><div class=\"flex space-x-4 mt-2\"><span class=\"font-semibold\">EY</span><span class=\"font-semibold\">KPMG</span><span class=\"font-semibold\">BCG</span><span class=\"font-semibold\">+ more</span></div></div><div class=\"separator mx-8\"></div><div class=\"w-1/2 pl-10\"><div class=\"cost-icon\"><i class=\"fas fa-chart-line\"></i></div><h2 class=\"text-xl font-semibold mb-4\">The Cost of Manual Slide Creation</h2><div class=\"mb-4\"><span class=\"text-4xl font-bold accent-text\">4 hours</span><span class=\"text-xl ml-2\">spent daily on slide creation</span></div><div class=\"bg-gray-50 p-4 rounded-lg mb-4\"><p class=\"font-semibold mb-2\">Impact per consultant:</p><table class=\"w-full\"><tr><td>Daily hours on slides:</td><td class=\"text-right\">4 hours</td></tr><tr><td>Average billing rate:</td><td class=\"text-right\">$300/hour</td></tr><tr class=\"border-t border-gray-300\"><td class=\"font-semibold\">Daily cost:</td><td class=\"text-right font-semibold\">$1,200</td></tr><tr><td class=\"font-semibold\">Annual cost (250 days):</td><td class=\"text-right font-semibold\">$300,000</td></tr></table></div><p class=\"mt-4\"><span class=\"accent-text font-semibold\">Project Prism</span> converts wasted hours into billable client value—increasing impact and profitability.</p></div></div></div></div></body></html>""",
-            """<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"/><meta content=\"width=device-width, initial-scale=1.0\" name=\"viewport\"/><title>Project Prism Architecture</title><link href=\"https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css\" rel=\"stylesheet\"/><link href=\"https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css\" rel=\"stylesheet\"/><link href=\"https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap\" rel=\"stylesheet\"/><style>body{font-family:'Roboto',sans-serif;background-color:white;color:#1A365D;margin:0;padding:0}.slide-container{width:1280px;min-height:720px;overflow:hidden;position:relative}.header{padding:0 60px 8px}.header h1{margin:0}.content{padding:0 60px}#prism-s2 .content{transform:scale(0.59);transform-origin:top center}.arch-box{border:2px solid #FF5722;border-radius:8px;background-color:#FFF5F2;padding:15px;position:relative}.arch-box-inner{border:1px solid #FF5722;border-radius:4px;background-color:white;padding:10px;margin:5px 0;display:flex;align-items:center;justify-content:center}.arrow{color:#FF5722;position:absolute;font-size:20px}.arrow-right:before{content:\"\\f061\";font-family:\"Font Awesome 5 Free\";font-weight:900}.arrow-down:before{content:\"\\f063\";font-family:\"Font Awesome 5 Free\";font-weight:900}.arrow-up:before{content:\"\\f062\";font-family:\"Font Awesome 5 Free\";font-weight:900}.icon-box{color:#FF5722;font-size:24px;margin-bottom:10px}</style></head><body><div class=\"slide-container\" id=\"prism-s2\"><div class=\"header\"><h1 class=\"text-3xl font-bold\">Project Prism Architecture</h1></div><div class=\"content\"><div class=\"flex flex-col items-center\"><div class=\"arch-box w-64 mb-8\"><div class=\"icon-box text-center\"><i class=\"fas fa-users\"></i></div><div class=\"text-center font-semibold mb-2\">Users</div><div class=\"text-sm text-center\">Natural language prompts for slide generation</div></div><div class=\"h-10 flex justify-center items-center\"><i class=\"fas fa-arrow-down text-orange-500\"></i></div><div class=\"arch-box w-3/4 mb-8\"><div class=\"icon-box text-center\"><i class=\"fas fa-desktop\"></i></div><div class=\"text-center font-semibold mb-2\">Project Prism App Interface</div><div class=\"flex justify-around\"><div class=\"arch-box-inner text-center w-1/4\"><div class=\"text-sm font-medium\">Interactive Editor</div></div><div class=\"arch-box-inner text-center w-1/4\"><div class=\"text-sm font-medium\">Review Pane</div></div><div class=\"arch-box-inner text-center w-1/4\"><div class=\"text-sm font-medium\">Export</div></div></div></div><div class=\"h-10 flex justify-center items-center\"><i class=\"fas fa-arrow-down text-orange-500\"></i></div><div class=\"arch-box w-3/4 mb-8\"><div class=\"icon-box text-center\"><i class=\"fas fa-brain\"></i></div><div class=\"text-center font-semibold\">LLM Content Creator</div><div class=\"text-sm text-center\">Intelligent content generation and orchestration</div></div><div class=\"h-10 flex justify-center items-center\"><i class=\"fas fa-arrow-down text-orange-500\"></i></div><div class=\"flex w-full justify-between mb-8\"><div class=\"arch-box w-5/12\"><div class=\"icon-box text-center\"><i class=\"fas fa-tools\"></i></div><div class=\"text-center font-semibold mb-2\">Agents / Tools</div><div class=\"grid grid-cols-2 gap-2\"><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">RAG</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">SQL</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">Data Viz</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">Iconographer</div></div><div class=\"arch-box-inner text-center col-span-2\"><div class=\"text-sm font-medium\">Web Search</div></div></div></div><div class=\"arch-box w-5/12\"><div class=\"icon-box text-center\"><i class=\"fas fa-file-powerpoint\"></i></div><div class=\"text-center font-semibold mb-2\">Slide Creation Framework</div><div class=\"flex flex-col space-y-2\"><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">CSS Theme</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">HTML Deck Manager</div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">Export Manager</div></div><div class=\"flex items-center\"><div class=\"flex-grow h-0.5 bg-gray-300\"></div><div class=\"px-2 text-gray-500 text-xs\">connects to</div><div class=\"flex-grow h-0.5 bg-gray-300\"></div></div><div class=\"arch-box-inner text-center\"><div class=\"text-sm font-medium\">Lakebase State Machine</div></div></div></div></div></div></body></html>""",
-            """<!DOCTYPE html>
-
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>Key Benefits for Consulting Firms</title>
-<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet"/>
-<link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap" rel="stylesheet"/>
-<style>
-        body {
-            font-family: 'Roboto', sans-serif;
-            background-color: white;
-            color: #1A365D;
-            margin: 0;
-            padding: 0;
-        }
-        .slide-container {
-            width: 1280px;
-            min-height: 720px;
-            overflow: hidden;
-            position: relative;
-        }
-        .header {
-            padding: 0 60px 8px;
-        }
-        .header h1 { margin: 0; }
-        .content {
-            padding: 0 60px;
-        }
-        .icon-circle {
-            width: 64px;
-            height: 64px;
-            border-radius: 32px;
-            background-color: #FFF5F2;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 15px;
-        }
-        .benefit-icon {
-            color: #FF5722;
-            font-size: 28px;
-        }
-        .benefit-box {
-            border: 1px solid #E2E8F0;
-            border-radius: 8px;
-            padding: 25px;
-            background-color: #F8FAFC;
-            height: 100%;
-        }
         
-    </style>
-</head>
-<body>
-<div class="slide-container">
-<div class="header">
-<h1 class="text-3xl font-bold">Key Benefits for Analysts &amp; Consulting Firms</h1>
- </div>
-<div class="content">
-<div class="grid grid-cols-3 gap-8">
-<!-- Benefit 1 -->
-<div class="benefit-box flex flex-col items-center text-center">
-<div class="icon-circle">
-<i class="benefit-icon fas fa-clock"></i>
-</div>
-<h3 class="text-xl font-semibold mb-2">Cut Deck Creation Time</h3>
-<p class="text-gray-700">Reduce slide creation time by 75% through AI-powered automation</p>
-</div>
-<!-- Benefit 2 -->
-<div class="benefit-box flex flex-col items-center text-center">
-<div class="icon-circle">
-<i class="benefit-icon fas fa-shield-alt"></i>
-</div>
-<h3 class="text-xl font-semibold mb-2">Enterprise-Grade Security</h3>
-<p class="text-gray-700">Secure access to client data via Databricks Unity Catalog</p>
-</div>
-<!-- Benefit 3 -->
-<div class="benefit-box flex flex-col items-center text-center">
-<div class="icon-circle">
-<i class="benefit-icon fas fa-brain"></i>
-</div>
-<h3 class="text-xl font-semibold mb-2">AI Model Flexibility</h3>
-<p class="text-gray-700">Choose AI models based on specific use cases and requirements</p>
-</div>
-<!-- Benefit 4 -->
-<div class="benefit-box flex flex-col items-center text-center">
-<div class="icon-circle">
-<i class="benefit-icon fas fa-database"></i>
-</div>
-<h3 class="text-xl font-semibold mb-2">Automated Data Warehousing</h3>
-<p class="text-gray-700">Convert natural language to SQL for seamless data analysis</p>
-</div>
-<!-- Benefit 5 -->
-<div class="benefit-box flex flex-col items-center text-center">
-<div class="icon-circle">
-<i class="benefit-icon fas fa-check-circle"></i>
-</div>
-<h3 class="text-xl font-semibold mb-2">Consistent Quality</h3>
-<p class="text-gray-700">Align perfectly with firm-native templates and branding</p>
-</div>
-<!-- Benefit 6 -->
-<div class="benefit-box flex flex-col items-center text-center">
-<div class="icon-circle">
-<i class="benefit-icon fas fa-handshake"></i>
-</div>
-<h3 class="text-xl font-semibold mb-2">Client Trust</h3>
-<p class="text-gray-700">Deliver high-quality materials that strengthen relationships</p>
-</div>
-</div>
-</div>
+        # Check if this is a follow-on request or first-time request
+        is_follow_on = slide_agent is not None and slide_agent.initial_state.get("todos") and len(slide_agent.initial_state.get("artifacts", {})) > 0
         
-</div>
-</body>
-</html>""",
-            """<html><body style='font-family:Arial'><div style='width:1280px;height:720px;display:flex;align-items:center;justify-content:center'><h1>Slide 4 (placeholder)</h1></div></body></html>""",
-            """<!DOCTYPE html>
+        # Create progress tracker with callback to append API messages
+        def progress_callback(update):
+            """Callback function to send progress updates to the chat"""
+            progress_text = f"🔄 {update.step} ({update.progress_percent}%)"
+            if update.details:
+                progress_text += f" - {update.details}"
+            if update.current_slide_title:
+                progress_text += f" - Working on: {update.current_slide_title}"
+            
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content=progress_text,
+                metadata={
+                    "title": "Progress Update",
+                    "progress": update.model_dump()
+                }
+            )
+        
+        progress_tracker = html_slides_agent.ProgressTracker(session_id, progress_callback)
+        
+        if not is_follow_on:
+            # First-time request: agent already created by session manager
+            print(f"[DEBUG] Streaming Flow - Using session agent for first-time request")
+            if hasattr(slide_agent, 'progress_tracker'):
+                slide_agent.progress_tracker = progress_tracker
+            
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content=(
+                    "I'll analyze your request and generate a professional slide deck using AI. "
+                    "You'll see progress updates as I work through each step."
+                ),
+            )
+        else:
+            # Follow-on request: reuse existing agent with new progress tracker
+            print(f"[DEBUG] Streaming Flow - Reusing existing agent for follow-on request")
+            if hasattr(slide_agent, 'progress_tracker'):
+                slide_agent.progress_tracker = progress_tracker
+            
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content="I'll process your follow-on request and update the existing slide deck. You'll see progress updates as I work.",
+            )
 
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>What Sets Project Prism Apart</title>
-<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet"/>
-<link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&amp;display=swap" rel="stylesheet"/>
-<style>
-        body { font-family: 'Roboto', sans-serif; background-color: white; color: #1A365D; margin: 0; padding: 0; }
-        .slide-container { width: 1280px; min-height: 720px; overflow: hidden; position: relative; }
-        .header { padding: 0 60px 8px; }
-        .header h1{ margin: 0; }
-        .content { padding: 0 60px; }
-        .icon-shield { width: 80px; height: 80px; border-radius: 40px; background-color: #FFF5F2; display: flex; align-items: center; justify-content: center; margin-bottom: 20px; }
-        .advantage-icon { color: #FF5722; font-size: 32px; }
-        .advantage-card { border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; background-color: #F8FAFC; height: 100%; transition: transform 0.2s; }
-        .advantage-card:hover { transform: translateY(-5px); }
-        .accent-text { color: #FF5722; font-weight: 500; }
-    </style>
-</head>
-<body>
-<div class=\"slide-container\">
-<div class=\"header\">
-<h1 class=\"text-3xl font-bold\">What Sets Project Prism Apart</h1>
-</div>
-<div class=\"content\">
-<div class=\"flex items-center mb-10\">
-<div class=\"icon-shield mr-6\">
-<i class=\"advantage-icon fas fa-shield-alt\"></i>
-</div>
-<div>
-<h2 class=\"text-2xl font-semibold mb-2\">Deep Integration with <span class=\"accent-text\">Databricks Unity Catalog</span></h2>
-<p class=\"text-lg\">The foundation of our enterprise security and governance capabilities</p>
-</div>
-</div>
-<div class=\"grid grid-cols-2 gap-8\">
-<div class=\"advantage-card\">
-<div class=\"flex items-center mb-4\"><div class=\"text-orange-500 mr-3 text-2xl\"><i class=\"fas fa-lock\"></i></div><h3 class=\"text-xl font-semibold\">Enterprise-Grade Security</h3></div>
-<ul class=\"space-y-2 ml-8\">
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>End-to-end encryption of sensitive client data</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Role-based access controls for consultants</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Fully auditable data access and slide generation</span></li>
-</ul>
-</div>
-<div class=\"advantage-card\">
-<div class=\"flex items-center mb-4\"><div class=\"text-orange-500 mr-3 text-2xl\"><i class=\"fas fa-balance-scale\"></i></div><h3 class=\"text-xl font-semibold\">Complete Governance Framework</h3></div>
-<ul class=\"space-y-2 ml-8\">
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Chain of trust for all generated content</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Compliance with industry regulations</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Automated documentation of data lineage</span></li>
-</ul>
-</div>
-<div class=\"advantage-card\">
-<div class=\"flex items-center mb-4\"><div class=\"text-orange-500 mr-3 text-2xl\"><i class=\"fas fa-brain\"></i></div><h3 class=\"text-xl font-semibold\">Flexible AI Orchestration</h3></div>
-<ul class=\"space-y-2 ml-8\">
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Choice of proprietary or open source models</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Custom model training on firm knowledge bases</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Advanced reasoning for complex slides</span></li>
-</ul>
-</div>
-<div class=\"advantage-card\">
-<div class=\"flex items-center mb-4\"><div class=\"text-orange-500 mr-3 text-2xl\"><i class=\"fas fa-network-wired\"></i></div><h3 class=\"text-xl font-semibold\">Built for Enterprise Integration</h3></div>
-<ul class=\"space-y-2 ml-8\">
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Seamless connectivity with existing systems</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Designed for regulated environments</span></li>
-<li class=\"flex items-start\"><i class=\"fas fa-check text-green-500 mr-2 mt-1\"></i><span>Scales with organizational needs</span></li>
-</ul>
-</div>
-</div>
-</div>
-</div>
-</body>
-</html>""",
-        ]
-
-        TITLES = ["The Opportunity", "Architecture", "Key Benefits", "Placeholder", "What Sets Prism Apart"]
-
-        # Share high-level plan
-        plan_lines = [f"{idx+1}) {title}" for idx, title in enumerate(TITLES)]
+        print(f"[DEBUG] Streaming Flow - Processing user prompt: {user_prompt}")
+        
+        # Use the agent's streaming method
+        import time
+        process_start = time.time()
+        result = slide_agent.process_message(user_prompt)  # Use regular method for now
+        process_time = time.time() - process_start
+        print(f"[DEBUG] Streaming Flow - process_message completed in {process_time:.2f}s")
+        
+        # Step 3: Check if slides were generated
+        slides = result.get("slides", [])
+        print(f"[DEBUG] Streaming Flow - Generated {len(slides)} slides")
+        
+        if not slides:
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content="❌ No slides were generated. Please try a different request.",
+                metadata={"title": "Agent tool result"}
+            )
+            return
+        
+        # Step 4: Show final success message
         _append_api_message(
             session_id,
             role="assistant",
-            content=(
-                "Plan: I'll generate a concise 5-slide deck in this order:\n\n"
-                + "\n".join(plan_lines)
-            ),
-            metadata={"title": "Plan"}
+            content=f"✅ Generated {len(slides)} slides successfully",
+            metadata={"title": "Agent tool result"}
+        )
+        
+        # Step 5: Show final status
+        status_list = result.get("status", [])
+        status_text = "\n".join([f"Slide {s.position}: {s.title}" for s in status_list])
+        print(f"[DEBUG] Streaming Flow - Status: {status_text}")
+        
+        if is_follow_on:
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content=f"Slide deck updated successfully!\n\n{status_text}"
+            )
+        else:
+            _append_api_message(
+                session_id,
+                role="assistant",
+                content=f"Slide deck created successfully!\n\n{status_text}"
+            )
+        
+        # Signal completion to stop frontend polling
+        _append_api_message(session_id, role="assistant", content="Generation complete.", metadata={"title": "Done"})
+        
+    except Exception as e:
+        print(f"[ERROR] Streaming Flow - Error processing request: {e}")
+        import traceback
+        traceback.print_exc()
+        _append_api_message(
+            session_id,
+            role="assistant",
+            content=f"❌ Error processing your request: {str(e)}",
+            metadata={"title": "Error"}
         )
 
-        for i in range(5):
-            title = TITLES[i]
-            # Announce what we're doing
-            _append_api_message(session_id, role="assistant", content=f"Planning slide {i+1}: {title}…")
-            # Realistic single tool usage message for refresh hook
-            _append_api_message(session_id, role="assistant", content="Using HTML Deck Manager to render slide…", metadata={"title": "🔧 Using a tool"})
-            time.sleep(0.9)
-            # Add slide to agent's artifacts directly
-            slide_id = i + 1
-            slide_agent.initial_state["artifacts"][slide_id] = PRISM_SLIDES[i]
-            # Also add to todos if not already present
-            if not any(todo.id == slide_id for todo in slide_agent.initial_state["todos"]):
-                from slide_generator.tools.html_slides_agent import SlideTodo
-                slide_agent.initial_state["todos"].append(
-                    SlideTodo(id=slide_id, action="WRITE_SLIDE", title=title, details="", depends_on=[])
-                )
-            # Provide hint for next slide BEFORE the tool result so tool result is last
-            if i < 4:
-                _append_api_message(session_id, role="assistant", content=f"Next: Slide {i+2} – {TITLES[i+1]}")
-                time.sleep(0.1)
-            # Trigger frontend refresh (ChatInterface listens for 'tool result')
-            _append_api_message(session_id, role="assistant", content=f"✅ Slide {i+1} ready: {title}", metadata={"title": "🔧 Tool result"})
 
-        outline = "\n".join([f"{i+1}) {TITLES[i]}" for i in range(5)])
-        _append_api_message(session_id, role="assistant", content=f"All set. Here's your deck outline:\n\n{outline}")
-        # Signal completion explicitly so the frontend can stop polling
-        _append_api_message(session_id, role="assistant", content="Generation complete.", metadata={"title": "Done"})
-    except Exception as e:
-        _append_api_message(session_id, role="assistant", content=f"Demo flow error: {e}")
 # Pydantic models for API requests/responses
 class ChatMessage(BaseModel):
     role: str
@@ -502,52 +380,6 @@ class ChatResponse(BaseModel):
 
 class SlidesResponse(BaseModel):
     slides: List[str]
-
-def openai_to_api_message(openai_msg: Dict) -> List[ChatMessage]:
-    """Convert OpenAI format message to API ChatMessage format"""
-    if openai_msg["role"] == "system":
-        return []  # Don't display system messages
-    
-    elif openai_msg["role"] == "user":
-        return [ChatMessage(role="user", content=openai_msg["content"])]
-    
-    elif openai_msg["role"] == "assistant":
-        messages = []
-        if "tool_calls" in openai_msg and openai_msg["content"]:
-            # Assistant with tool calls
-            messages.append(ChatMessage(role="assistant", content=openai_msg["content"]))
-            tool_content = f"Calling tool {openai_msg['tool_calls'][0]['function']['name']} with arguments {openai_msg['tool_calls'][0]['function']['arguments']}"
-            messages.append(ChatMessage(
-                role="assistant",
-                content=tool_content,
-                metadata={"title": "🔧 Using a tool"}
-            ))
-        else:
-            # Regular assistant message
-            messages.append(ChatMessage(role="assistant", content=openai_msg["content"]))
-        return messages
-    
-    elif openai_msg["role"] == "tool":
-        # Tool result - display as assistant message with special formatting
-        return [ChatMessage(
-            role="assistant", 
-            content=f"✅ {openai_msg['content']}",
-            metadata={"title": "🔧 Tool result"}
-        )]
-    
-    return []
-
-def get_or_create_conversation(session_id: str) -> Dict:
-    """Get or create conversation for session using session manager"""
-    session = session_manager.get_or_create_session(session_id)
-    return session["conversation"]
-
-def update_conversations_with_openai_message(session_id: str, openai_msg: Dict):
-    """Add OpenAI message to both conversation lists"""
-    conv = get_or_create_conversation(session_id)
-    conv["openai_conversation"].append(openai_msg)
-    api_messages = openai_to_api_message(openai_msg)
-    conv["api_conversation"].extend(api_messages)
 
 @app.get("/")
 async def root():
@@ -568,27 +400,241 @@ async def chat(request: ChatRequest):
         
         if not user_input:
             conv = get_or_create_conversation(session_id)
-            return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
+            return ChatResponse(messages=conv, session_id=session_id)
         
-        # Demo static mode: bypass LLM and tools, render predefined slides
-        if DEMO_STATIC_MODE:
-            # Minimal transcript: add user only, then process synchronously
-            update_conversations_with_openai_message(session_id, {"role": "user", "content": user_input})
-            # Process the LLM flow synchronously to block until completion
-            _run_llm_flow(session_id, user_input)
-            conv = get_or_create_conversation(session_id)
-            return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
-
-        # Normal mode: Add user message and process synchronously
-        user_msg_openai = {"role": "user", "content": user_input}
-        update_conversations_with_openai_message(session_id, user_msg_openai)
-        # Process the conversation synchronously to block until completion
-        _run_llm_flow(session_id, user_input)
+        # Process the LLM flow with streaming updates
+        _run_llm_flow_streaming(session_id, user_input)
         conv = get_or_create_conversation(session_id)
-        return ChatResponse(messages=conv["api_conversation"], session_id=session_id)
+        return ChatResponse(messages=conv, session_id=session_id)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing chat: {str(e)}")
+
+@app.get("/chat/history/{session_id}", response_model=ChatResponse)
+async def get_chat_history(session_id: str):
+    """Get conversation history for a session"""
+    try:
+        conv = get_or_create_conversation(session_id)
+        return ChatResponse(messages=conv, session_id=session_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting chat history: {str(e)}")
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """Handle chat messages with real-time streaming using Server-Sent Events and Fan-out Agent"""
+    try:
+        session_id = request.session_id
+        user_input = request.message.strip()
+        
+        if not user_input:
+            raise HTTPException(status_code=400, detail="Message cannot be empty")
+        
+        # Add user message to conversation history
+        _append_api_message(session_id, role="user", content=user_input)
+        
+        async def event_generator():
+            """Generate Server-Sent Events for real-time updates using Fan-out Agent"""
+            # Get session-specific agent
+            slide_agent = session_manager.get_slide_agent(session_id)
+            session = session_manager.get_or_create_session(session_id)
+            
+            try:
+                # Check if this is a follow-on request or first-time request
+                is_follow_on = slide_agent is not None and slide_agent.initial_state.get("todos") and len(slide_agent.initial_state.get("artifacts", {})) > 0
+                
+                # Create fan-out progress tracker with async callback to send SSE events
+                async def progress_callback(update):
+                    """Async callback function to send progress updates via SSE"""
+                    progress_data = {
+                        "type": "progress",
+                        "step": update.step,
+                        "progress_percent": update.progress_percent,
+                        "details": update.details,
+                        "slides_completed": update.slides_completed,
+                        "total_slides": update.total_slides,
+                        "current_slide_title": update.current_slide_title,
+                        "elapsed_time": update.elapsed_time,
+                        "error": update.error,
+                        "branch_id": update.branch_id
+                    }
+                    # Note: We'll handle progress updates in the main loop
+                
+                progress_tracker = FanOutProgressTracker(session_id, progress_callback)
+                print(f"[MAIN] Created fan-out progress_tracker: {progress_tracker}")
+                
+                if not is_follow_on:
+                    # First-time request: agent already created by session manager
+                    print(f"[STREAM] Using session fan-out agent for first-time request")
+                    if hasattr(slide_agent, 'progress_tracker'):
+                        slide_agent.progress_tracker = progress_tracker
+                    
+                    # Send initial message
+                    initial_msg = "I'll analyze your request and generate a professional slide deck using AI with parallel processing and Genie integration. You'll see real-time progress updates as I work through each step."
+                    yield f"data: {json.dumps({'type': 'message', 'content': initial_msg})}\n\n"
+                else:
+                    # Follow-on request: reuse existing agent with new progress tracker
+                    print(f"[STREAM] Reusing existing fan-out agent for follow-on request")
+                    if hasattr(slide_agent, 'progress_tracker'):
+                        slide_agent.progress_tracker = progress_tracker
+                    
+                    # Send initial message
+                    follow_on_msg = "I'll process your follow-on request and update the existing slide deck with parallel processing. You'll see real-time progress updates as I work."
+                    yield f"data: {json.dumps({'type': 'message', 'content': follow_on_msg})}\n\n"
+                
+                print(f"[STREAM] Processing user prompt with fan-out agent: {user_input}")
+                
+                # Use fan-out agent's streaming method for better performance and parallel Genie calls
+                final_state = None
+                
+                async for chunk in slide_agent.process_message_streaming_async(
+                    user_input, 
+                    run_id=f"run_{int(time.time())}",
+                    max_concurrency=3  # Allow up to 3 parallel slides
+                ):
+                    node = chunk.get("node")
+                    progress = chunk.get("progress", 0)
+                    state = chunk.get("state", {})
+                    result = chunk.get("result")
+                    
+                    print(f"[STREAM] Fan-out chunk: node={node}, progress={progress}%")
+                    
+                    # Check for pending updates from progress_tracker
+                    if progress_tracker and hasattr(progress_tracker, 'get_pending_updates'):
+                        pending_updates = progress_tracker.get_pending_updates()
+                        for update in pending_updates:
+                            progress_data = {
+                                "type": "progress",
+                                "step": update.step,
+                                "progress_percent": update.progress_percent,
+                                "details": update.details,
+                                "slides_completed": update.slides_completed,
+                                "total_slides": update.total_slides,
+                                "current_slide_title": update.current_slide_title,
+                                "elapsed_time": update.elapsed_time,
+                                "error": update.error,
+                                "branch_id": update.branch_id
+                            }
+                            print(f"[STREAM] Yielding pending update: {update.step}")
+                            yield f"data: {json.dumps(progress_data)}\n\n"
+                    
+                    # Handle different node types
+                    if node == "complete":
+                        # Final completion
+                        final_state = result
+                        print(f"[STREAM] Generation completed successfully")
+                        
+                        if result and result.get("success"):
+                            slides_generated = len(result.get("slides", []))
+                            completion_msg = f"✅ Successfully generated {slides_generated} slides with parallel processing and Genie integration!"
+                            
+                            # Send completion message
+                            yield f"data: {json.dumps({'type': 'message', 'content': completion_msg})}\n\n"
+                            
+                            # Emit final slides update so frontend renders without manual refresh
+                            try:
+                                slides_list = result.get("slides", []) or []
+                                if not slides_list and slide_agent is not None:
+                                    # Fallback to agent slides
+                                    slides_list = slide_agent.get_slides() or []
+                                if not slides_list and isinstance(final_state, dict):
+                                    # Fallback to artifacts in final state
+                                    artifacts = final_state.get("artifacts", {}) or {}
+                                    if isinstance(artifacts, dict):
+                                        slides_list = list(artifacts.values())
+                                # Cache in session so GET /slides/html is immediately consistent
+                                session['latest_slides'] = slides_list
+                                slides_event = {"type": "slides_update", "slides": slides_list}
+                                yield f"data: {json.dumps(slides_event)}\n\n"
+                            except Exception as _e:
+                                print(f"[STREAM] slides_update emission (complete) failed: {_e}")
+                            
+                            # Update conversation history
+                            _append_api_message(
+                                session_id,
+                                role="assistant",
+                                content=completion_msg,
+                                metadata={"slides_generated": slides_generated, "parallel_genie_calls": True}
+                            )
+                        else:
+                            error_msg = "❌ Generation failed. Please try again."
+                            yield f"data: {json.dumps({'type': 'message', 'content': error_msg})}\n\n"
+                            
+                    elif node == "error":
+                        # Error handling
+                        error_msg = result.get("error", "Unknown error occurred")
+                        print(f"[STREAM] Generation error: {error_msg}")
+                        yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
+                        
+                    else:
+                        # Node completion
+                        node_data = {
+                            "type": "node_complete",
+                            "node": node,
+                            "progress": progress,
+                            "details": f"Completed {node} step"
+                        }
+                        yield f"data: {json.dumps(node_data)}\n\n"
+                        
+                        # Emit slides_update on key nodes so frontend updates automatically
+                        try:
+                            if node in ("join_results", "status"):
+                                slides_list = []
+                                # Prefer agent-rendered slides
+                                if slide_agent is not None:
+                                    slides_list = slide_agent.get_slides() or []
+                                # Fallback to state artifacts if needed
+                                if not slides_list and isinstance(state, dict):
+                                    artifacts = state.get("artifacts", {}) or {}
+                                    if isinstance(artifacts, dict):
+                                        slides_list = list(artifacts.values())
+                                # Only emit if we have something meaningful
+                                if slides_list:
+                                    # Cache in session
+                                    session['latest_slides'] = slides_list
+                                    slides_event = {"type": "slides_update", "slides": slides_list}
+                                    yield f"data: {json.dumps(slides_event)}\n\n"
+                        except Exception as _e:
+                            print(f"[STREAM] slides_update emission failed on node '{node}': {_e}")
+                        
+                        # Capture state for final update
+                        if state:
+                            final_state = state
+                
+                # Update the agent's state with the final result
+                if final_state:
+                    print(f"[STREAM] Updating agent state with final state")
+                    print(f"[STREAM] Final state keys: {list(final_state.keys())}")
+                    
+                    # Update the agent's initial_state with the final state
+                    for key, value in final_state.items():
+                        if key in slide_agent.initial_state:
+                            slide_agent.initial_state[key] = value
+                    
+                    print(f"[STREAM] Agent state updated. Status count: {len(slide_agent.initial_state.get('status', []))}")
+                    print(f"[STREAM] Agent state updated. Artifacts count: {len(slide_agent.initial_state.get('artifacts', {}))}")
+                
+                # Send done event
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                
+            except Exception as e:
+                print(f"[STREAM ERROR] {e}")
+                import traceback
+                traceback.print_exc()
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing streaming chat: {str(e)}")
 
 
 @app.get("/chat/status/{session_id}")
@@ -596,9 +642,22 @@ async def get_chat_status(session_id: str):
     """Get current conversation status and messages"""
     conv = get_or_create_conversation(session_id)
     return {
-        "messages": conv["api_conversation"],
+        "messages": conv,
         "session_id": session_id,
-        "message_count": len(conv["api_conversation"])
+        "message_count": len(conv)
+    }
+
+@app.get("/debug/agent")
+async def debug_agent(session_id: str = "default"):
+    """Debug endpoint to check agent state"""
+    slide_agent = session_manager.get_slide_agent(session_id)
+    return {
+        "session_id": session_id,
+        "slide_agent_exists": slide_agent is not None,
+        "slide_agent_type": type(slide_agent).__name__ if slide_agent else None,
+        "initial_state_keys": list(slide_agent.initial_state.keys()) if slide_agent else [],
+        "status_count": len(slide_agent.initial_state.get("status", [])) if slide_agent else 0,
+        "artifacts_count": len(slide_agent.initial_state.get("artifacts", {})) if slide_agent else 0
     }
 
 @app.get("/slides/html", response_model=SlidesResponse)
@@ -607,11 +666,30 @@ async def get_slides_html(session_id: str = "default"):
     try:
         slide_agent = session_manager.get_slide_agent(session_id)
         print(f"[DEBUG] get_slides_html - slide_agent: {slide_agent}")
+        print(f"[DEBUG] get_slides_html - slide_agent is None: {slide_agent is None}")
+        
+        if slide_agent is None:
+            print(f"[DEBUG] get_slides_html - No slide agent, returning empty slides")
+            return SlidesResponse(slides=[])
         
         slides_list = slide_agent.get_slides()
         print(f"[DEBUG] get_slides_html - slides count: {len(slides_list)}")
         if slides_list:
             print(f"[DEBUG] get_slides_html - first slide preview: {slides_list[0][:200]}...")
+        
+        # If get_slides() returns empty, try getting from artifacts directly
+        if not slides_list and 'artifacts' in slide_agent.initial_state:
+            artifacts = slide_agent.initial_state['artifacts']
+            print(f"[DEBUG] get_slides_html - artifacts count: {len(artifacts)}")
+            slides_list = list(artifacts.values())
+            print(f"[DEBUG] get_slides_html - slides from artifacts: {len(slides_list)}")
+        
+        # If still empty, try getting from session cache
+        if not slides_list:
+            session = session_manager.get_or_create_session(session_id)
+            session_slides = session.get('latest_slides', [])
+            print(f"[DEBUG] get_slides_html - session cached slides count: {len(session_slides)}")
+            slides_list = session_slides
         
         return SlidesResponse(slides=slides_list)
     except Exception as e:
@@ -728,76 +806,164 @@ async def get_slides_status(session_id: str = "default"):
 
 @app.post("/slides/export")
 async def export_slides(session_id: str = "default"):
-    """Export slides to file"""
+    """Export slides to individual HTML files in a timestamped directory"""
     try:
-        slide_agent = session_manager.get_slide_agent(session_id)
-        output_path = config.get_output_path("exported_slides.html")
-        saved_files = slide_agent.save_slides(str(output_path.parent))
-        return {"message": f"Slides exported successfully to {len(saved_files)} files", "path": str(output_path)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error exporting slides: {str(e)}")
-
-@app.get("/slides/export/pptx")
-async def export_slides_pptx(session_id: str = "default") -> FileResponse:
-    """Export the current deck to a PPTX file and stream it back.
-
-    Uses the HtmlToPptxConverter from tools/html_to_pptx.py (pulled from export-visuals branch).
-    """
-    try:
-        from slide_generator.tools.html_to_pptx import HtmlToPptxConverter
-        from slide_generator.config import get_output_path
-
-        # Compose output path (timestamped)
-        from datetime import datetime
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = get_output_path(f"slides_{ts}.pptx")
-
-        # Ensure directory exists
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Create adapter that implements the SlideDeckProtocol for the converter
-        class SlideDeckAgentAdapter:
-            def __init__(self, agent):
-                self.agent = agent
-            
-            def get_slides(self):
-                """Get slides as list of HTML strings."""
-                return self.agent.get_slides()
-            
-            def to_html(self):
-                """Compatibility method - same as get_slides."""
-                return self.get_slides()
-                
-            @property
-            def theme(self):
-                """Get the slide theme."""
-                return self.agent.theme
-        
         # Get session-specific slide agent
         slide_agent = session_manager.get_slide_agent(session_id)
-        adapter = SlideDeckAgentAdapter(slide_agent)
-        converter = HtmlToPptxConverter(adapter)
-        await converter.convert_to_pptx(str(output_path), include_charts=True)
+        
+        # Validate slides exist
+        slides = slide_agent.get_slides()
+        if not slides:
+            raise HTTPException(
+                status_code=400,
+                detail="No slides to export. Please generate slides first."
+            )
+        
+        # Create timestamped output directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = get_output_path(f"slides_export_{timestamp}")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save slides
+        saved_files = slide_agent.save_slides(str(output_dir))
+        
+        # Get slide information for response
+        status = slide_agent.get_status()
+        slide_info = [
+            {
+                "file": Path(f).name,
+                "title": s.title,
+                "position": s.position
+            }
+            for f, s in zip(saved_files, status) if s.is_generated
+        ]
+        
+        return {
+            "success": True,
+            "message": f"Successfully exported {len(saved_files)} slides",
+            "output_dir": str(output_dir),
+            "slides": slide_info
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error exporting slides: {str(e)}"
+        )
 
-        # Stream file
+@app.get("/slides/export/pptx")
+async def export_slides_pptx(session_id: str = "default", use_screenshot: bool = True) -> FileResponse:
+    """Export the current deck to PowerPoint format using V3 converter.
+    
+    Uses the V3 maximum LLM flexibility approach with proven 100% success rate.
+    
+    Args:
+        session_id: Session identifier for retrieving slides
+        use_screenshot: Whether to use screenshot mode (default: True)
+            - True: Pixel-perfect charts as images (for presentations)
+            - False: Editable PowerPoint charts (for analysis)
+    
+    Requirements:
+        - playwright: pip install playwright && playwright install
+        - python-pptx: pip install python-pptx
+        - databricks-sdk: pip install databricks-sdk
+    
+    Returns:
+        FileResponse: PowerPoint file for download
+    """
+    try:
+        # Get session-specific slide agent
+        slide_agent = session_manager.get_slide_agent(session_id)
+        
+        # Validate slides exist
+        slides = slide_agent.get_slides()
+        if not slides:
+            raise HTTPException(
+                status_code=400,
+                detail="No slides to export. Please generate slides first."
+            )
+        
+        print(f"[V3 PPTX Export] Starting export of {len(slides)} slides")
+        print(f"[V3 PPTX Export] Screenshot mode: {use_screenshot}")
+        
+        # Check if V3 converter is available
+        if pptx_converter_v3 is None:
+            raise HTTPException(
+                status_code=501,
+                detail="V3 PowerPoint converter not initialized. Check server logs for details."
+            )
+        
+        # Generate timestamped output path
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = get_output_path(f"slides_v3_{timestamp}.pptx")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        print(f"[V3 PPTX Export] Output path: {output_path}")
+        
+        # Save HTML files for screenshot capture and validation
+        html_output_dir = output_path.parent / f"html_v3_{timestamp}"
+        html_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        saved_html_files = []
+        for i, status in enumerate(slide_agent.get_status(), 1):
+            if status.is_generated:
+                # Create sanitized filename
+                safe_title = status.title.replace(' ', '_').replace('/', '_')[:30]
+                html_file = html_output_dir / f"slide_{i}_{safe_title}.html"
+                html_file.write_text(status.html, encoding='utf-8')
+                saved_html_files.append(str(html_file))
+                print(f"[V3 PPTX Export] Saved HTML {i}: {html_file.name}")
+        
+        print(f"[V3 PPTX Export] Saved {len(saved_html_files)} HTML files")
+        
+        # Convert using V3
+        result_path = await pptx_converter_v3.convert_slide_deck(
+            slides=slides,
+            output_path=str(output_path),
+            use_screenshot=use_screenshot,
+            html_source_paths=saved_html_files
+        )
+        
+        print(f"[V3 PPTX Export] ✅ Conversion complete: {result_path}")
+        print(f"[V3 PPTX Export] HTML files available at: {html_output_dir}")
+        
+        # Verify file was created
+        if not os.path.exists(output_path):
+            raise Exception("PowerPoint file was not created")
+        
+        file_size = os.path.getsize(output_path) / 1024
+        print(f"[V3 PPTX Export] File size: {file_size:.1f}KB")
+        
+        # Return file for download
         return FileResponse(
             path=str(output_path),
             media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             filename=output_path.name,
         )
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error exporting PPTX: {str(e)}")
+        print(f"[V3 PPTX Export] ❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error exporting to PowerPoint: {str(e)}"
+        )
 
 @app.get("/conversation/{session_id}")
 async def get_conversation(session_id: str):
     """Get conversation history for debugging"""
     conv = get_or_create_conversation(session_id)
     return {
-        "conversation": conv["api_conversation"],  # Main conversation for UI
-        "openai_conversation": conv["openai_conversation"],  # Debug info
-        "api_conversation": conv["api_conversation"],  # Backward compatibility
+        "conversation": conv,
         "session_id": session_id,
-        "message_count": len(conv["api_conversation"])
+        "message_count": len(conv)
     }
 
 if __name__ == "__main__":

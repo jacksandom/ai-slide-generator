@@ -1,0 +1,142 @@
+"""
+User authentication middleware for Databricks Apps.
+
+This middleware extracts user information from X-Forwarded-* headers
+provided by Databricks Apps and attaches it to the request state.
+
+In development mode, it falls back to environment variables.
+
+Reference: https://learn.microsoft.com/en-us/azure/databricks/dev-tools/databricks-apps/system-env
+"""
+
+import logging
+import os
+from typing import Optional
+
+from fastapi import Request
+from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+
+logger = logging.getLogger(__name__)
+
+
+class UserContext(BaseModel):
+    """User context information extracted from request headers."""
+
+    user_id: str
+    email: str
+    username: str
+    ip_address: Optional[str] = None
+
+    @property
+    def session_key(self) -> str:
+        """
+        Generate session key for this user.
+        
+        Used in Phase 4 for per-user session isolation.
+        """
+        return f"session:{self.user_id}"
+
+
+class UserContextMiddleware(BaseHTTPMiddleware):
+    """
+    Extract user information from Databricks-provided headers.
+    
+    Production (Databricks Apps):
+        - X-Forwarded-User: User ID (email)
+        - X-Forwarded-Email: User email address
+        - X-Forwarded-Preferred-Username: Display name
+        - X-Real-Ip: Client IP address
+        - X-Request-Id: Unique request identifier
+    
+    Development (local):
+        - Falls back to environment variables:
+            - DEV_USER_ID
+            - DEV_USER_EMAIL
+            - DEV_USERNAME
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        # Extract user info from headers (Databricks Apps production)
+        user_id = request.headers.get("x-forwarded-user")
+        email = request.headers.get("x-forwarded-email")
+        username = request.headers.get("x-forwarded-preferred-username")
+        ip_address = request.headers.get("x-real-ip")
+        request_id = request.headers.get("x-request-id")
+
+        # Fallback for local development
+        if not user_id:
+            environment = os.getenv("ENVIRONMENT", "development")
+            if environment == "development":
+                user_id = os.getenv("DEV_USER_ID", "dev_user@local.dev")
+                email = os.getenv("DEV_USER_EMAIL", "dev_user@local.dev")
+                username = os.getenv("DEV_USERNAME", "Dev User")
+                ip_address = "127.0.0.1"
+                request_id = "dev-request-id"
+                
+                logger.debug(
+                    f"Using development user context: {user_id}",
+                    extra={"user_id": user_id}
+                )
+            else:
+                # Production but headers missing - should not happen
+                logger.warning(
+                    "Production environment but no X-Forwarded-User header found",
+                    extra={"path": request.url.path}
+                )
+                user_id = "unknown@databricks.com"
+                email = "unknown@databricks.com"
+                username = "Unknown User"
+
+        # Create user context and attach to request state
+        try:
+            user_context = UserContext(
+                user_id=user_id or "unknown",
+                email=email or "unknown",
+                username=username or "Unknown",
+                ip_address=ip_address,
+            )
+            request.state.user = user_context
+        except Exception as e:
+            logger.error(
+                f"Failed to create user context: {e}",
+                extra={"user_id": user_id},
+                exc_info=True
+            )
+            # Create fallback context
+            request.state.user = UserContext(
+                user_id="error@databricks.com",
+                email="error@databricks.com",
+                username="Error User",
+            )
+
+        # Attach request ID for tracking
+        request.state.request_id = request_id or "unknown"
+
+        # Process request
+        response = await call_next(request)
+
+        # Add request ID to response headers for client-side tracking
+        if request_id:
+            response.headers["X-Request-Id"] = request_id
+
+        return response
+
+
+def get_user_context(request: Request) -> UserContext:
+    """
+    Dependency function to extract user context from request state.
+    
+    Usage:
+        from fastapi import Depends
+        
+        @router.post("/api/chat")
+        async def chat(
+            request: ChatRequest,
+            user_context: UserContext = Depends(get_user_context)
+        ):
+            logger.info(f"Chat request from {user_context.user_id}")
+            # Use user_context for logging, session lookup, etc.
+    """
+    return request.state.user
+

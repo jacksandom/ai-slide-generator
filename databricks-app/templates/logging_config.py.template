@@ -1,0 +1,160 @@
+"""
+Structured logging configuration for Databricks Apps.
+
+All logs are output in JSON format for easy parsing and aggregation.
+- stdout: INFO and DEBUG logs
+- stderr: WARNING, ERROR, and CRITICAL logs
+
+Reference: https://learn.microsoft.com/en-us/azure/databricks/dev-tools/databricks-apps/best-practices
+"""
+
+import json
+import logging
+import sys
+from datetime import datetime
+from typing import Any, Dict, Optional
+
+
+class JSONFormatter(logging.Formatter):
+    """
+    Format log records as JSON for structured logging.
+    
+    Output format:
+    {
+        "timestamp": "2024-11-17T10:00:00Z",
+        "level": "INFO",
+        "logger": "src.api.routes.chat",
+        "message": "Chat request received",
+        "user_id": "user@databricks.com",
+        "request_id": "abc-123",
+        "duration_ms": 1500
+    }
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        # Base log data
+        log_data: Dict[str, Any] = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+
+        # Add extra fields if present
+        # These are typically added via extra={} in log calls
+        extra_fields = [
+            "user_id",
+            "request_id",
+            "duration_ms",
+            "method",
+            "path",
+            "status_code",
+            "latency_ms",
+        ]
+        
+        for field in extra_fields:
+            if hasattr(record, field):
+                log_data[field] = getattr(record, field)
+
+        # Add exception info if present
+        if record.exc_info:
+            log_data["exception"] = self.formatException(record.exc_info)
+
+        # Add stack info if present
+        if record.stack_info:
+            log_data["stack_info"] = self.formatStack(record.stack_info)
+
+        return json.dumps(log_data)
+
+
+class TextFormatter(logging.Formatter):
+    """
+    Simple text formatter for development.
+    
+    Format: 2024-11-17 10:00:00 - logger - LEVEL - message
+    """
+
+    def __init__(self):
+        super().__init__(
+            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+
+
+def setup_logging(
+    log_level: str = "INFO",
+    log_format: str = "json"
+) -> logging.Logger:
+    """
+    Configure structured logging for the application.
+    
+    Args:
+        log_level: Minimum log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        log_format: Log format (json, text)
+    
+    Returns:
+        Root logger instance
+    """
+    # Create handlers
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stderr_handler = logging.StreamHandler(sys.stderr)
+
+    # Configure levels
+    # INFO and DEBUG go to stdout, WARNING+ go to stderr
+    stdout_handler.setLevel(logging.DEBUG)
+    stdout_handler.addFilter(lambda record: record.levelno < logging.WARNING)
+    
+    stderr_handler.setLevel(logging.WARNING)
+
+    # Apply formatter based on configuration
+    if log_format == "json":
+        formatter = JSONFormatter()
+    else:
+        formatter = TextFormatter()
+
+    stdout_handler.setFormatter(formatter)
+    stderr_handler.setFormatter(formatter)
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+    
+    # Remove any existing handlers
+    root_logger.handlers.clear()
+    
+    # Add our handlers
+    root_logger.addHandler(stdout_handler)
+    root_logger.addHandler(stderr_handler)
+
+    # Log startup message
+    root_logger.info(
+        "Logging configured",
+        extra={
+            "log_level": log_level,
+            "log_format": log_format,
+        }
+    )
+
+    return root_logger
+
+
+# Example usage in application:
+#
+# from src.utils.logging_config import setup_logging
+#
+# # At startup (in main.py)
+# settings = get_settings()
+# logger = setup_logging(
+#     log_level=settings.log_level,
+#     log_format=settings.log_format
+# )
+#
+# # In application code
+# logger.info(
+#     "Chat request received",
+#     extra={
+#         "user_id": user_context.user_id,
+#         "request_id": request_id,
+#     }
+# )
+

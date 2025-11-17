@@ -1,0 +1,82 @@
+# Databricks App Configuration Template
+# Copy this to root directory as app.yaml and customize for your environment
+# See: https://learn.microsoft.com/en-us/azure/databricks/dev-tools/databricks-apps/
+
+name: ai-slide-generator
+display_name: "AI Slide Generator"
+description: "Generate and edit HTML slide decks using AI with Databricks Genie integration"
+
+# Startup command - Databricks Apps expects app to listen on 0.0.0.0:8080
+# Command is executed from the app root directory
+command: 
+  - "uvicorn"
+  - "src.api.main:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8080"
+  - "--log-level"
+  - "info"
+
+# Environment variables available to the application at runtime
+# System environment variables (DATABRICKS_HOST, DATABRICKS_TOKEN) are automatically provided
+# See: https://learn.microsoft.com/en-us/azure/databricks/dev-tools/databricks-apps/system-env
+env:
+  # Application environment (development, production)
+  - name: ENVIRONMENT
+    value: production
+  
+  # Logging configuration
+  - name: LOG_LEVEL
+    value: INFO
+  
+  - name: LOG_FORMAT
+    value: json
+  
+  # Enable serving frontend static files
+  - name: SERVE_FRONTEND
+    value: "true"
+  
+  # MLflow configuration
+  - name: MLFLOW_TRACKING_URI
+    value: databricks
+  
+  # Add your custom environment variables here
+  # - name: CUSTOM_VAR
+  #   value: custom_value
+
+# Compute resources
+# Options: SMALL, MEDIUM, LARGE
+# See: https://learn.microsoft.com/en-us/azure/databricks/dev-tools/databricks-apps/resources
+compute:
+  size: SMALL
+  
+  # For future auto-scaling (when available):
+  # min_replicas: 1
+  # max_replicas: 3
+
+# Access permissions
+# Configure who can access and manage the app
+permissions:
+  # Default: All users can use the app
+  - level: CAN_USE
+    group_name: users
+  
+  # Add specific managers (optional)
+  # - level: CAN_MANAGE
+  #   user_name: admin@company.com
+  
+  # Add specific user groups (optional)
+  # - level: CAN_USE
+  #   group_name: data-team
+
+# Health check configuration (optional but recommended)
+# Databricks Apps will periodically check this endpoint
+health_check:
+  endpoint: /api/health
+  interval_seconds: 60
+  timeout_seconds: 10
+  
+  # Expected response for healthy status
+  # If this check fails, the app may be restarted
+

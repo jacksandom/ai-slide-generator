@@ -1,0 +1,113 @@
+"""
+Request logging middleware for Databricks Apps.
+
+Logs all HTTP requests and responses with timing information
+and user context for observability.
+"""
+
+import logging
+import time
+
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+
+logger = logging.getLogger(__name__)
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """
+    Log all HTTP requests and responses with timing.
+    
+    Logs include:
+    - Request method and path
+    - User ID (if available from UserContextMiddleware)
+    - Request ID (if available)
+    - Response status code
+    - Request duration in milliseconds
+    - Exceptions (if any)
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        start_time = time.time()
+
+        # Extract user context if available (set by UserContextMiddleware)
+        user_context = getattr(request.state, "user", None)
+        user_id = user_context.user_id if user_context else "unknown"
+        
+        # Extract request ID
+        request_id = getattr(request.state, "request_id", "unknown")
+
+        # Log request start
+        logger.info(
+            f"Request started: {request.method} {request.url.path}",
+            extra={
+                "user_id": user_id,
+                "request_id": request_id,
+                "method": request.method,
+                "path": str(request.url.path),
+            }
+        )
+
+        try:
+            # Process request
+            response = await call_next(request)
+            
+            # Calculate duration
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # Log successful response
+            logger.info(
+                f"Request completed: {request.method} {request.url.path} {response.status_code}",
+                extra={
+                    "user_id": user_id,
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": str(request.url.path),
+                    "status_code": response.status_code,
+                    "duration_ms": duration_ms,
+                }
+            )
+
+            return response
+
+        except Exception as e:
+            # Calculate duration even for errors
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # Log error with exception info
+            logger.error(
+                f"Request failed: {request.method} {request.url.path}",
+                extra={
+                    "user_id": user_id,
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": str(request.url.path),
+                    "duration_ms": duration_ms,
+                },
+                exc_info=True  # Include full exception traceback
+            )
+            
+            # Re-raise exception to be handled by FastAPI
+            raise
+
+
+# Example integration in main.py:
+#
+# from src.api.middleware.auth import UserContextMiddleware
+# from src.api.middleware.logging import RequestLoggingMiddleware
+# from src.utils.logging_config import setup_logging
+#
+# # Setup logging first
+# logger = setup_logging(
+#     log_level=settings.log_level,
+#     log_format=settings.log_format
+# )
+#
+# app = FastAPI(...)
+#
+# # Add middleware in order (executed bottom to top)
+# # RequestLoggingMiddleware should run first to log full request lifecycle
+# # UserContextMiddleware should run second to extract user info
+# app.add_middleware(RequestLoggingMiddleware)
+# app.add_middleware(UserContextMiddleware)
+
